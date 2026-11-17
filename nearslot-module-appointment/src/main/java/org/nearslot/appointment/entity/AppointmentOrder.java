@@ -19,4 +19,6 @@ public class AppointmentOrder {
     private Integer status;
     private Integer amountCent;
     private LocalDateTime holdExpiresAt;
+    /** 对账状态：1 待对账 / 2 不一致 / 4 已一致（ReconcileStatus）。 */
+    private Integer reconcileStatus;
 }

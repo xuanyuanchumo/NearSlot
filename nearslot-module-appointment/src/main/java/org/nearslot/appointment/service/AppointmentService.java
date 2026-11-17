@@ -33,6 +33,7 @@ public class AppointmentService {
     private final AppointmentOrderMapper orderMapper;
     private final DistributedLockTemplate lockTemplate;
     private final HoldTimeoutTask holdTimeoutTask;
+    private final ReconcileService reconcileService;
 
     /**
      * 分布式 ID：直接用 MyBatis-Plus 的 IdWorker（成熟库优先，ADR-016）。
@@ -72,6 +73,11 @@ public class AppointmentService {
             luaService.rollback(userId, slotId, slot.getTechnicianId(), startTs, endTs, orderId, traceId, 1);
             throw e;
         }
+        // 对账日志（best-effort）：写入失败不影响下单，但对账任务会因此判 ABNORMAL，
+        // 所以这里必须写，否则 ABNORMAL 永远无法归零（Phase 2 出口标准）。
+        reconcileService.writeBestEffort(orderId, LogType.BOOK, true,
+            r.getBeforeQty(), r.getDeductQty(), r.getAfterQty(), traceId, "order created");
+
         log.info("book ok userId={} slotId={} orderId={} traceId={} before={} after={}",
             userId, slotId, orderId, traceId, r.getBeforeQty(), r.getAfterQty());
         return orderId;
@@ -107,8 +113,13 @@ public class AppointmentService {
         o.setStatus(OrderStatus.CANCELLED.getCode());
         orderMapper.updateById(o);
 
-        luaService.rollback(userId, o.getSlotId(), o.getTechnicianId(), startTs, endTs, orderId, traceId, 1);
-        log.info("cancel ok userId={} orderId={} logType={} traceId={}",
-            userId, orderId, LogType.RESTORE.getCode(), traceId);
+        BookResult rb = luaService.rollback(userId, o.getSlotId(), o.getTechnicianId(),
+            startTs, endTs, orderId, traceId, 1);
+        // 回补结果同样入对账日志（成功/失败都记，便于三方互证）
+        reconcileService.writeBestEffort(orderId, LogType.RESTORE, rb.success(),
+            rb.getBeforeQty(), rb.getDeductQty(), rb.getAfterQty(), traceId,
+            rb.success() ? "cancel rollback" : "cancel rollback failed code=" + rb.getCode());
+        log.info("cancel ok userId={} orderId={} logType={} traceId={} rollbackSuccess={}",
+            userId, orderId, LogType.RESTORE.getCode(), traceId, rb.success());
     }
 }

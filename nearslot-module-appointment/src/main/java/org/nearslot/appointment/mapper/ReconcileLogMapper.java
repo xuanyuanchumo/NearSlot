@@ -1,8 +1,8 @@
-package org.nearslot.order.mapper;
+package org.nearslot.appointment.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
-import org.nearslot.order.entity.ReconcileLog;
+import org.nearslot.appointment.entity.ReconcileLog;
 
 @Mapper
 public interface ReconcileLogMapper extends BaseMapper<ReconcileLog> {

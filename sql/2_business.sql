@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS appointment_order (
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1待支付 2已确认 3已取消 4已完成 5已退款',
   amount_cent INT NOT NULL DEFAULT 0,
   hold_expires_at DATETIME NULL COMMENT 'Hold 过期时刻',
+  reconcile_status TINYINT NULL COMMENT '对账状态 1待对账 2不一致 4已一致',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT uq_user_slot UNIQUE (user_id, slot_id),

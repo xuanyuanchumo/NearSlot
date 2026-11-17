@@ -36,5 +36,6 @@ updated: 2026-11-16
 | G0 治理就绪 | [gates/G0-governance.md](gates/G0-governance.md) |
 | G1 需求评审 | [gates/G1-requirements.md](gates/G1-requirements.md) |
 | G2 设计评审 | [gates/G2-design.md](gates/G2-design.md) |
+| Phase 2 出口 | [gates/phase2-exit.md](gates/phase2-exit.md) |
 
 > 门禁定义：[quality/review-system.md](../quality/review-system.md) · 需求：[quality/functional-requirements.md](../quality/functional-requirements.md) · 研究依据：[research/00-coverage-matrix.md](../research/00-coverage-matrix.md)

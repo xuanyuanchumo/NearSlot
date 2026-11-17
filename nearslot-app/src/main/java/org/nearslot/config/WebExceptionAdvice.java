@@ -29,6 +29,12 @@ public class WebExceptionAdvice {
         if (segment == 401) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setHeader("X-Auth-Reason", "no-session");
+        } else if (segment == 403) {
+            // 权限不足（如内部接口令牌校验失败）：必须返回真实 403，
+            // 否则监控/网关无法按状态码告警（实测踩坑：曾误返 200）
+            response.setStatus(HttpStatus.FORBIDDEN.value());
+        } else if (segment == 404) {
+            response.setStatus(HttpStatus.NOT_FOUND.value());
         } else if (segment == 429) {
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         }

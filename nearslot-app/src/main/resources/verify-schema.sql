@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS appointment_order (
   status TINYINT DEFAULT 1,
   amount_cent INT DEFAULT 0,
   hold_expires_at TIMESTAMP NULL,
+  reconcile_status TINYINT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
