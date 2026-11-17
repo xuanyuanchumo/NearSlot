@@ -8,10 +8,15 @@ spring:
       password: ${REDIS_PASSWORD:}
       # 本地验证：docker run --name nearslot-redis-verify -p 46379:6379 redis:7-alpine --requirepass $REDIS_PASSWORD
   datasource:
-    url: jdbc:h2:mem:nearslot;MODE=MySQL;DB_CLOSE_DELAY=-1
+    # NON_KEYWORDS=USER：user 是 H2 保留字，需显式放行（生产 MySQL 无此问题）
+    url: jdbc:h2:mem:nearslot;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:verify-schema.sql
 
 server:
   port: 48081

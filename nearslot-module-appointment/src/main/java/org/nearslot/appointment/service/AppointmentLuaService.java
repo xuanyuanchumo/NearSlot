@@ -58,7 +58,7 @@ public class AppointmentLuaService {
 
     /** 回补（ADR-005 反转语义）。 */
     public BookResult rollback(long userId, long slotId, long techId,
-                               long startTs, long orderId, long traceId, int operate) {
+                               long startTs, long endTs, long orderId, long traceId, int operate) {
         String raw = redis.execute(ROLLBACK_SCRIPT,
             List.of(RedisConstants.SLOT_STOCK + slotId,
                     RedisConstants.SLOT_USER + slotId,
@@ -66,7 +66,7 @@ public class AppointmentLuaService {
                     RedisConstants.TECH_RANK + "timeline:" + techId),
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(orderId), String.valueOf(traceId),
-            String.valueOf(operate), "86400", String.valueOf(startTs));
+            String.valueOf(operate), "86400", String.valueOf(endTs));
         return parse(raw);
     }
 

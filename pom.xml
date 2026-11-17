@@ -30,8 +30,9 @@
   </dependencies></dependencyManagement>
   <dependencies>
     <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><scope>provided</scope></dependency>
-    <!-- OpenAPI 注解（Knife4j Next / ADR-018）：各业务模块共用，仅编译期需要 -->
-    <dependency><groupId>io.swagger.core.v3</groupId><artifactId>swagger-annotations-jakarta</artifactId><version>2.2.30</version><scope>provided</scope></dependency>
+    <!-- OpenAPI 注解由 Knife4j Next starter 传递提供（ADR-018）。
+         切勿在此显式锁定 swagger-annotations 版本：会与 swagger-core 2.2.55 冲突，
+         导致 /v3/api-docs 抛 NoSuchMethodError: Schema.$dynamicRef()（已实测踩坑）。 -->
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>${junit.version}</version><scope>test</scope></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
   </dependencies>
@@ -41,7 +42,26 @@
       <executions><execution><id>flatten</id><phase>process-resources</phase><goals><goal>flatten</goal></goals></execution>
       <execution><id>flatten.clean</id><phase>clean</phase><goals><goal>clean</goal></goals></execution></executions>
     </plugin>
-    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><configuration><release>21</release><encoding>UTF-8</encoding></configuration></plugin>
+    <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><configuration><release>21</release><encoding>UTF-8</encoding><parameters>true</parameters></configuration></plugin>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version><configuration><excludedGroups>integration</excludedGroups></configuration></plugin>
   </plugins></build>
+  <profiles>
+    <!-- 集成测试 profile：覆盖默认 excludedGroups=integration（方案 A 的真实验证通道） -->
+    <profile>
+      <id>integration</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration>
+              <excludedGroups combine.self="override"/>
+              <groups>integration</groups>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

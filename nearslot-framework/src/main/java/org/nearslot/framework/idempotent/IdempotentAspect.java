@@ -33,7 +33,13 @@ public class IdempotentAspect {
         EvaluationContext ctx = new StandardEvaluationContext();
         String[] names = sig.getParameterNames();
         Object[] args = pjp.getArgs();
-        for (int i = 0; i < args.length; i++) ctx.setVariable(names[i], args[i]);
+        // 防御：若编译未开 -parameters，getParameterNames() 返回 null。
+        // 此时用 arg0/arg1... 兜底，并在缺乏注解参数名时直接放行而非抛 NPE（实测踩坑）。
+        if (names == null) {
+            for (int i = 0; i < args.length; i++) ctx.setVariable("arg" + i, args[i]);
+        } else {
+            for (int i = 0; i < args.length; i++) ctx.setVariable(names[i], args[i]);
+        }
         String key = PREFIX + parser.parseExpression(anno.key()).getValue(ctx, String.class);
 
         boolean first = redisson.getBucket(key).trySet("1", anno.ttl(), TimeUnit.SECONDS);

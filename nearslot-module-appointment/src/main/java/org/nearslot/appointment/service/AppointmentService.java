@@ -61,7 +61,7 @@ public class AppointmentService {
             persistHold(userId, slot, orderId);
         } catch (RuntimeException e) {
             // 落库失败必须回补，否则余量泄漏
-            luaService.rollback(userId, slotId, slot.getTechnicianId(), startTs, orderId, traceId, 1);
+            luaService.rollback(userId, slotId, slot.getTechnicianId(), startTs, endTs, orderId, traceId, 1);
             throw e;
         }
         log.info("book ok userId={} slotId={} orderId={} traceId={} before={} after={}",
@@ -93,12 +93,13 @@ public class AppointmentService {
         }
         TimeSlot slot = timeSlotMapper.selectById(o.getSlotId());
         long startTs = slot.getStartsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        long endTs = slot.getEndsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         long traceId = nextId();
 
         o.setStatus(OrderStatus.CANCELLED.getCode());
         orderMapper.updateById(o);
 
-        luaService.rollback(userId, o.getSlotId(), o.getTechnicianId(), startTs, orderId, traceId, 1);
+        luaService.rollback(userId, o.getSlotId(), o.getTechnicianId(), startTs, endTs, orderId, traceId, 1);
         log.info("cancel ok userId={} orderId={} logType={} traceId={}",
             userId, orderId, LogType.RESTORE.getCode(), traceId);
     }
