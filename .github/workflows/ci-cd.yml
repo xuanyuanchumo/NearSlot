@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: python NearSlot/scripts/docs/check_docs.py NearSlot/docs --repo-root .
+      - name: 成熟库优先检查（C-ARCH-06）
+        run: bash NearSlot/scripts/dev/check-wheels.sh
   # 契约门禁（ADR-018）：生成 openapi.json 并检测破坏性变更
   contract:
     needs: [docs]

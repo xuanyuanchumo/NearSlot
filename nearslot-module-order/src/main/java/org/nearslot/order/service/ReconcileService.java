@@ -22,14 +22,13 @@ public class ReconcileService {
     public static final long IN_FLIGHT_WINDOW_MS = 12_000L;
 
     private final ReconcileLogMapper logMapper;
-    private static final AtomicLong SEQ = new AtomicLong(System.currentTimeMillis());
 
     /** 写入对账日志，异常仅记 warn（不反向影响业务事务）。 */
     public void writeBestEffort(Long orderId, LogType type, boolean success,
                                 int beforeQty, int changeQty, int afterQty, Long traceId, String remark) {
         try {
             ReconcileLog l = new ReconcileLog();
-            l.setId(SEQ.incrementAndGet());
+            l.setId(org.nearslot.framework.id.IdGenerator.nextId());
             l.setOrderId(orderId);
             l.setLogType(type.getCode());
             l.setResult(success ? RESULT_SUCCESS : RESULT_FAIL);

@@ -33,9 +33,12 @@ public class AppointmentService {
     private final AppointmentOrderMapper orderMapper;
     private final DistributedLockTemplate lockTemplate;
 
-    /** 简易雪花占位（Phase 4 换 MyBatis-Plus IdWorker，此处保证 orderId ≠ traceId）。 */
-    private static final AtomicLong SEQ = new AtomicLong(System.currentTimeMillis());
-    private static long nextId() { return SEQ.incrementAndGet(); }
+    /**
+     * 分布式 ID：直接用 MyBatis-Plus 的 IdWorker（成熟库优先，ADR-016）。
+     * 此前手写 AtomicLong 是造轮子：单机自增、无 workerId 隔离、重启易撞号。
+     * IdWorker 自带雪花算法（时间戳+数据中心+机器+序列），且保证多次调用不重复。
+     */
+    private static long nextId() { return org.nearslot.framework.id.IdGenerator.nextId(); }
 
     /** Hold 窗口：必须大于支付 P99（research/08 §4）。 */
     private static final long HOLD_MINUTES = 10;

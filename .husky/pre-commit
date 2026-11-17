@@ -1,3 +1,4 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 python scripts/docs/check_docs.py docs --repo-root . || exit 1
+bash scripts/dev/check-wheels.sh || exit 1

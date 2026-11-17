@@ -52,7 +52,7 @@ class AppointmentLuaIntegrationTest {
         factory.afterPropertiesSet();
         redis = new StringRedisTemplate(factory);
         redis.afterPropertiesSet();
-        luaService = new AppointmentLuaService(redis);
+        luaService = new AppointmentLuaService(redis, new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @AfterEach

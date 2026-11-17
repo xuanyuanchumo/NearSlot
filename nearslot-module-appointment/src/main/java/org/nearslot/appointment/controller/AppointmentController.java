@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.nearslot.appointment.dto.BookRequest;
 import org.nearslot.appointment.service.AppointmentService;
+import org.nearslot.appointment.service.WaitlistService;
 import org.nearslot.common.Result;
 import org.nearslot.common.context.UserHolder;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class AppointmentController {
     private final AppointmentService appointmentService;
+    private final WaitlistService waitlistService;
 
     /** 抢约：POST /api/v1/appointments。 */
     @Operation(summary = "抢约", description = "Lua 三重检查（余量/一人一时段/技师时间轴）原子预扣，成功返回 orderId 并进入 Hold 待支付",
@@ -26,6 +28,22 @@ public class AppointmentController {
     public Result<Long> book(@Valid @RequestBody BookRequest req) {
         Long orderId = appointmentService.book(UserHolder.get(), req.getSlotId());
         return Result.ok(orderId);
+    }
+
+    /** 加入候补：POST /api/v1/appointments/{slotId}/waitlist。 */
+    @Operation(summary = "加入候补", description = "ZSet 公平排序（时间戳+抖动），返回位次；已存在返回原序位",
+        security = @SecurityRequirement(name = "bearerAuth"))
+    @PostMapping("/{slotId}/waitlist")
+    public Result<Long> joinWaitlist(@PathVariable("slotId") Long slotId) {
+        return Result.ok(waitlistService.join(slotId, UserHolder.get()));
+    }
+
+    /** 退出候补。 */
+    @Operation(summary = "退出候补", security = @SecurityRequirement(name = "bearerAuth"))
+    @DeleteMapping("/{slotId}/waitlist")
+    public Result<Void> leaveWaitlist(@PathVariable("slotId") Long slotId) {
+        waitlistService.leave(slotId, UserHolder.get());
+        return Result.ok(null);
     }
 
     /** 取消预约：POST /api/v1/appointments/{id}/cancel。 */

@@ -24,7 +24,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AppointmentLuaService {
     private final StringRedisTemplate redis;
-    private final ObjectMapper mapper = new ObjectMapper();
+    /** 复用 Spring 容器中的 ObjectMapper（成熟配置：已注册 JavaTime、宽容未知字段），不手 new。 */
+    private final ObjectMapper mapper;
 
     private static final DefaultRedisScript<String> BOOK_SCRIPT = loadScript("lua/appointmentBook.lua");
     private static final DefaultRedisScript<String> ROLLBACK_SCRIPT = loadScript("lua/appointmentRollback.lua");

@@ -1,0 +1,82 @@
+---
+title: 成熟库优先原则（全阶段强制）
+status: current
+source_of_truth:
+  - ../../docs/standards/library-first.md
+updated: 2026-11-17
+---
+
+# 成熟库优先原则（全阶段强制）
+
+> **一句话**：**有成熟库就用成熟库，非必要不重造轮子。**
+> 适用范围：Phase 0–5 **全部阶段**、全部代码与文档，不限于某一模块。
+
+## 0. 为什么单独立这篇
+
+本项目此前把"框架能力注解化"写进 ADR-003/016，但**没有可执行的判定规则**，导致实际开发中反复造轮子。2026-11-17 审计发现 5 处自研替代了现成库（见 §3）。本文把原则落成"动手前的强制自检"。
+
+## 1. 动手前必须回答的 4 个问题
+
+写任何"工具类/框架件/算法"之前，按序自问，**答完才能写代码**：
+
+| # | 问题 | 若答案为"有" |
+|---|---|---|
+| 1 | JDK / Spring 自带能力能否满足？ | 用 JDK/Spring，不写工具类 |
+| 2 | 已在依赖树中的库（见 §2）能否满足？ | 直接用，不新增依赖 |
+| 3 | 成熟第三方库能否满足（Redisson/Guava/MyBatis-Plus/Caffeine…）？ | 引入并用，**不手写算法** |
+| 4 | 参考项目（PickNear / hmdp-plus）是否已有实现？ | 先读懂再复用或改进，**不重复发明** |
+
+四个问题全为"否"才允许自研，且必须在 PR 描述中写明"为什么不能复用"。
+
+## 2. 本项目已确定的能力 → 库映射（禁止替代实现）
+
+| 能力 | **必须使用** | 禁止 |
+|---|---|---|
+| 分布式锁 | Redisson `RLock` / `RReadWriteLock` | 手写 SET NX + Lua 释放 |
+| 限流 | Redisson `RRateLimiter` | 自写令牌桶 Lua（除非有明确性能证据） |
+| 延迟队列 | Redisson `RDelayedQueue` | 自研 DelayQueue / 纯轮询扫描（轮询只可作兜底） |
+| 分布式 ID | `com.baomidou.mybatisplus.core.toolkit.IdWorker` | 手写雪花 / `AtomicLong` 自增 |
+| 对象映射 | Spring 容器中的 `ObjectMapper` Bean | `new ObjectMapper()` |
+| 密码哈希 | `BCryptPasswordEncoder`（容器 Bean） | 自写哈希 / 明文比对 |
+| 本地缓存 | Caffeine | 手写 ConcurrentHashMap + 过期 |
+| 布隆过滤 | Guava `BloomFilter`（或 RedisBloom） | 手写位数组 |
+| HTTP 客户端 | Spring `RestClient`/`WebClient` | `new RestTemplate()` / 手写 socket |
+| JSON | Jackson | 手写拼接 |
+| 定时任务 | Spring `@Scheduled` / 延迟队列 | 自建线程 sleep 循环 |
+| 幂等 | Redisson `RBucket.trySet` + AOP | 手写 SETNX 切面 |
+| 参数校验 | `jakarta.validation` 注解 | 手写 if 校验链 |
+| 重试 | Spring Retry / Resilience4j | 手写 for + sleep |
+| 分页 | MyBatis-Plus `Page` | 手写 limit 拼接 |
+
+## 3. 2026-11-17 审计发现的违规（已修复）
+
+| # | 自研实现 | 应使用的库 | 修复 |
+|---|---|---|---|
+| 1 | `AtomicLong SEQ` 生成订单号（3 处） | MP `IdWorker` | 已改 `IdGenerator.nextId()`（薄封装，可回推时间、多实例不撞号） |
+| 2 | `new BCryptPasswordEncoder()` | 容器 Bean | 已改注入，新增 `PasswordConfig` |
+| 3 | `new ObjectMapper()` | Spring 的 ObjectMapper | 已改构造注入 |
+| 4 | 自研 `new SecureRandom()` 验证码 | 可保留（JDK 原语，非轮子） | 保留并注明理由 |
+| 5 | Hold 超时纯轮询扫描 | Redisson 延迟队列 | **待办**：主路径改延迟队列，扫描降为兜底 |
+
+## 4. 复核机制（全阶段）
+
+| 检查点 | 动作 | 执行者 |
+|---|---|---|
+| G2 设计评审 | 新设计的每个"自研件"必须填 §1 四问答案 | designer |
+| G3 代码评审 | grep 拦截：`new ObjectMapper|new RestTemplate|new ThreadPoolExecutor|AtomicLong.*SEQ` | reviewer |
+| G4 测试评审 | 自研算法必须有对比测试（与库实现结果一致） | tester |
+| 每次 PR | 新增依赖需在描述中说明"为何选它而非自研" | developer |
+
+## 5. 允许自研的例外情形（需 ADR）
+
+1. 成熟库**明确不满足**某些语义（如 Lua 原子脚本必须手写，因为需要单次 RTT 的复合判断）；
+2. 库引入**不可接受的成本**（依赖体积 / 许可证 / 安全漏洞）；
+3. 库的版本与 Spring Boot 4 **不兼容**且无替代（如本次 Redisson starter 需升 4.8.0）。
+
+以上均须**新增 ADR 记录理由**，不得口头决定。
+
+## 6. 与既有 ADR 的关系
+
+- ADR-003「通用能力沉淀为 framework 模块」→ 指**封装**，不是**重写**；
+- ADR-016「框架能力优先用成熟库」→ 本文是其**可执行细则**；
+- 两者冲突时以本文为准。

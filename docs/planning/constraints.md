@@ -48,6 +48,7 @@ updated: 2026-11-16
 | C-DOC-01 | frontmatter 必填 + 链接可达 + current 索引可达 + source_of_truth 存在 | standards/doc.md §3 | check_docs.py（C1–C6） | 文档缺 updated 或坏链接 | 全门禁 |
 | C-DOC-02 | 一主题一 current；legacy 必填 superseded_by 且不被索引链接 | doc.md §1 | check_docs.py C1/C3 | legacy 仍出现在 README 导航 | G0 |
 | C-DOC-03 | 中文注释齐全；Javadoc/Lua 头注释不漂移 | standards/coding.md / research/12 §4 | reviewer 检查单 | Lua 头注释 KEYS 与 Java 传参不符（research/09 §F.5） | G3 |
+| C-ARCH-06 | **成熟库优先**：锁/限流/延迟队列/ID/密码/缓存/布隆必须用既定库，禁自研替代 | ADR-016 + standards/library-first.md | `scripts/dev/check-wheels.sh`：grep 拦截手写轮子 | 手写 AtomicLong 生成订单号 | G2/G3 |
 | C-DOC-05 | 接口契约以 api/openapi.json 为唯一事实源，由 /v3/api-docs 生成入库 | ADR-018 | CI contract job：生成 + diff；删路径/删方法即阻断 | 手写接口文档与代码不一致 | G2/G5 |
 | C-DOC-04 | 版本四端一致：pom revision / package.json / API 版本 / migration 版本 | research/10 §版本 | 版本同步脚本（Phase 0 待实现骨架） | 前端 0.0.0 后端 0.0.1-SNAPSHOT 无握手 | G5 |
 
