@@ -56,7 +56,11 @@ updated: 2026-11-17
 | 2 | `new BCryptPasswordEncoder()` | 容器 Bean | 已改注入，新增 `PasswordConfig` |
 | 3 | `new ObjectMapper()` | Spring 的 ObjectMapper | 已改构造注入 |
 | 4 | 自研 `new SecureRandom()` 验证码 | 可保留（JDK 原语，非轮子） | 保留并注明理由 |
-| 5 | Hold 超时纯轮询扫描 | Redisson 延迟队列 | **待办**：主路径改延迟队列，扫描降为兜底 |
+| 5 | Hold 超时纯轮询扫描 | Redisson 延迟队列 | **已修复**：主路径改 `RDelayedQueue`，60s 轮询降为幂等兜底 |
+| 6 | 异常处理器另起名 `GlobalExceptionHandler` | 与参考项目一致的 `WebExceptionAdvice` | **已修复**：改名，降低接手成本 |
+| 7 | 防爆破单 key（语义退化） | PickNear 双维度：计数+锁 | **已修复**：`login:fail:count:{phone}`(24h/10) + `login:lock:{phone}`(30min)，常量精确对齐 |
+| 8 | 候补仅 1 个 ZSet | hmdp-plus 三键 | **已修复**：ZSet+Set+Status Hash，提升拆出 `PromotionService` |
+| 9 | `ObjectMapper` 拆包后无 Bean | 显式注册（Boot 4 不再自动装配） | **已修复**：新增 `JacksonConfig`，开启 JavaTime + 忽略未知字段 |
 
 ## 4. 复核机制（全阶段）
 

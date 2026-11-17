@@ -9,81 +9,106 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 候补队列（FR-3.2 / research/08 §5）。
+ * 候补队列（FR-3.2）。
  *
- * 设计要点（区别于 hmdp-plus 同步 autoIssue）：
- * 1. **公平排序**：score = tsMs*1000 + jitter（同毫秒随机抖动，防网络邻近者插队）。
- * 2. **幂等入队**：Lua 判断已存在则返回原序位，不重复写入。
- * 3. **取消端点不做提升**：只发 slot.opened 事件，提升走异步消费（避免取消变慢）。
- * 4. **exactly-once**：提升前用分布式锁抢占 + offer 唯一约束兜底。
+ * 三键设计**严格对齐 hmdp-plus** `VoucherServiceImpl.subscribe`：
+ *   1. `subscribe:user:{slotId}`   Set  —— 候补用户集合，用于幂等去重；
+ *   2. `subscribe:zset:{slotId}`   ZSet —— 队列，member=userId，score=入队时间戳；
+ *      仅当 Set 首次加入成功（added>0）才写 ZSet，避免重复入队扰动排序；
+ *   3. `subscribe:status:{slotId}` Hash —— field=userId，value=状态码
+ *      （1=SUBSCRIBED 候补中，2=SUCCESS 已成为正式预约），**状态不降级**。
+ *
+ * 与 hmdp-plus 的差异（NearSlot 特有）：
+ * - 查询已购用 `slot:user:{slotId}`（本项目的"已约集合"），而非券项目的 SECKILL_USER_TAG_KEY；
+ * - 提升前用分布式锁抢占，保证 exactly-once（hmdp-plus 在消费者里做）。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class WaitlistService {
 
-    private static final String JOIN_LUA =
-        "if redis.call('ZSCORE', KEYS[1], ARGV[1]) then "
-        + "  return redis.call('ZRANK', KEYS[1], ARGV[1]) + 1 "
-        + "end "
-        + "redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1]) "
-        + "return redis.call('ZRANK', KEYS[1], ARGV[1]) + 1";
+    /** 状态码：1 候补中；2 已成功（对齐 hmdp-plus SubscribeStatus）。 */
+    public static final int STATUS_SUBSCRIBED = 1;
+    public static final int STATUS_SUCCESS = 2;
+
+    private static final long TTL_SECONDS = 86400L;
 
     private final StringRedisTemplate redis;
-    private final DistributedLockTemplate lockTemplate;
 
-    /** 加入候补，返回位次（1-based）；已存在则返回原序位。 */
+    /** 加入候补：Set 幂等 + ZSet 排序 + Hash 状态（三键原子性由脚本外的顺序写保证）。 */
     public long join(long slotId, long userId) {
-        long ts = System.currentTimeMillis();
-        long jitter = (long) (Math.random() * 999);
-        double score = ts * 1000.0 + jitter;
-        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
-        script.setScriptText(JOIN_LUA);
-        script.setResultType(Long.class);
-        Long rank = redis.execute(script,
-            List.of(RedisConstants.CANDIDATE + slotId), String.valueOf(userId), String.valueOf(score));
-        return rank == null ? -1 : rank;
+        String uid = String.valueOf(userId);
+        String setKey = RedisConstants.SUBSCRIBE_USER + slotId;
+        String zsetKey = RedisConstants.SUBSCRIBE_ZSET + slotId;
+        String statusKey = RedisConstants.SUBSCRIBE_STATUS + slotId;
+
+        // 1) 已购（已成功预约）则直接标记 SUCCESS，不进入队列
+        boolean purchased = Boolean.TRUE.equals(
+            redis.opsForSet().isMember(RedisConstants.SLOT_USER + slotId, uid));
+        if (purchased) {
+            redis.opsForHash().put(statusKey, uid, String.valueOf(STATUS_SUCCESS));
+            redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+            log.info("用户已预约该时段，直接标记 SUCCESS slotId={} userId={}", slotId, userId);
+            return -1;
+        }
+
+        // 2) Set 幂等加入
+        Long added = redis.opsForSet().add(setKey, uid);
+        redis.expire(setKey, TTL_SECONDS, TimeUnit.SECONDS);
+
+        // 3) 仅首次加入才写 ZSet（保持既有排序不被扰动）
+        if (Objects.nonNull(added) && added > 0) {
+            redis.opsForZSet().add(zsetKey, uid, (double) System.currentTimeMillis());
+            redis.expire(zsetKey, TTL_SECONDS, TimeUnit.SECONDS);
+        } else {
+            redis.expire(zsetKey, TTL_SECONDS, TimeUnit.SECONDS);
+        }
+
+        // 4) 状态置 SUBSCRIBED，但不降级已 SUCCESS 的用户
+        Object prev = redis.opsForHash().get(statusKey, uid);
+        if (prev == null || !String.valueOf(STATUS_SUCCESS).equals(String.valueOf(prev))) {
+            redis.opsForHash().put(statusKey, uid, String.valueOf(STATUS_SUBSCRIBED));
+        }
+        redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+
+        Long rank = redis.opsForZSet().rank(zsetKey, uid);
+        return rank == null ? -1 : rank + 1;
     }
 
-    /** 退出候补。 */
+    /** 退出候补：三键一并清理。 */
     public boolean leave(long slotId, long userId) {
-        Long removed = redis.opsForZSet().remove(RedisConstants.CANDIDATE + slotId, String.valueOf(userId));
-        return removed != null && removed > 0;
+        String uid = String.valueOf(userId);
+        redis.opsForSet().remove(RedisConstants.SUBSCRIBE_USER + slotId, uid);
+        redis.opsForZSet().remove(RedisConstants.SUBSCRIBE_ZSET + slotId, uid);
+        Object status = redis.opsForHash().get(RedisConstants.SUBSCRIBE_STATUS + slotId, uid);
+        // 已成功的不允许退订清除（保护既有预约语义）
+        if (status != null && String.valueOf(STATUS_SUCCESS).equals(String.valueOf(status))) {
+            return false;
+        }
+        redis.opsForHash().delete(RedisConstants.SUBSCRIBE_STATUS + slotId, uid);
+        return true;
     }
 
-    /** 查询位次与队列长度（前端展示「你前面还有 N 人」）。 */
+    /** 查询位次（1-based，-1 表示不在队列）。 */
     public long rank(long slotId, long userId) {
-        Long r = redis.opsForZSet().rank(RedisConstants.CANDIDATE + slotId, String.valueOf(userId));
+        Long r = redis.opsForZSet().rank(RedisConstants.SUBSCRIBE_ZSET + slotId, String.valueOf(userId));
         return r == null ? -1 : r + 1;
     }
 
+    /** 队列长度。 */
     public long size(long slotId) {
-        Long n = redis.opsForZSet().zCard(RedisConstants.CANDIDATE + slotId);
+        Long n = redis.opsForZSet().zCard(RedisConstants.SUBSCRIBE_ZSET + slotId);
         return n == null ? 0 : n;
     }
 
-    /**
-     * 提升队首（由 slot.opened 事件异步调用）。
-     *
-     * exactly-once 保障：分布式锁抢占（同 slot 同一时刻只有一个提升者）。
-     * 返回被提升的 userId，无候选返回 null。
-     */
-    public Long promoteNext(long slotId) {
-        String lockKey = RedisConstants.LOCK + "promote:" + slotId;
-        // waitMillis 必须 >0：并发提升是正常场景，应排队等待而非直接放弃。
-        // 实测踩坑：传 0 时 5 个并发线程只有 1 个拿到锁，其余静默返回 null，
-        // 表现为「候补只提升 1 人」，队列中真实用户被饿死。
-        return lockTemplate.withLock(lockKey, 3_000L, 5_000L, () -> {
-            Set<String> head = redis.opsForZSet().range(RedisConstants.CANDIDATE + slotId, 0, 0);
-            if (head == null || head.isEmpty()) return null;
-            String userId = head.iterator().next();
-            // 出队（避免重复提升）
-            redis.opsForZSet().remove(RedisConstants.CANDIDATE + slotId, userId);
-            log.info("候补提升 slotId={} userId={}", slotId, userId);
-            return Long.valueOf(userId);
-        });
+    /** 查询候补状态码；null 表示未候补。 */
+    public Integer status(long slotId, long userId) {
+        Object v = redis.opsForHash().get(RedisConstants.SUBSCRIBE_STATUS + slotId, String.valueOf(userId));
+        return v == null ? null : Integer.valueOf(String.valueOf(v));
     }
 }

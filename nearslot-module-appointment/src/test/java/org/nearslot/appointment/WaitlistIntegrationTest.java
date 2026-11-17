@@ -1,6 +1,7 @@
 package org.nearslot.appointment;
 
 import org.junit.jupiter.api.*;
+import org.nearslot.appointment.service.PromotionService;
 import org.nearslot.appointment.service.WaitlistService;
 import org.nearslot.framework.cache.RedisConstants;
 import org.nearslot.framework.lock.DistributedLockTemplate;
@@ -23,6 +24,7 @@ class WaitlistIntegrationTest {
 
     static StringRedisTemplate redis;
     static WaitlistService waitlist;
+    static PromotionService promotion;
     static RedissonClient redisson;
 
     @BeforeAll
@@ -44,7 +46,8 @@ class WaitlistIntegrationTest {
         if (!pwd.isBlank()) single.setPassword(pwd);
         redisson = Redisson.create(rc);
 
-        waitlist = new WaitlistService(redis, new DistributedLockTemplate(redisson));
+        waitlist = new WaitlistService(redis);
+        promotion = new PromotionService(redis, new DistributedLockTemplate(redisson));
     }
 
     @AfterAll
@@ -105,14 +108,14 @@ class WaitlistIntegrationTest {
         waitlist.join(slotId, 401L);
         waitlist.join(slotId, 402L);
 
-        Long first = waitlist.promoteNext(slotId);
+        Long first = promotion.promoteNext(slotId);
         assertEquals(401L, first, "应先提升最早入队者");
         assertEquals(1, waitlist.size(slotId), "提升后应出队");
 
-        Long second = waitlist.promoteNext(slotId);
+        Long second = promotion.promoteNext(slotId);
         assertEquals(402L, second);
 
-        assertNull(waitlist.promoteNext(slotId), "空队列应返回 null");
+        assertNull(promotion.promoteNext(slotId), "空队列应返回 null");
     }
 
     @Test
@@ -128,7 +131,7 @@ class WaitlistIntegrationTest {
         for (int i = 0; i < 5; i++) {
             futures.add(pool.submit(() -> {
                 try { go.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                Long u = waitlist.promoteNext(slotId);
+                Long u = promotion.promoteNext(slotId);
                 if (u != null) promoted.add(u);
             }));
         }

@@ -32,6 +32,7 @@ public class AppointmentService {
     private final TimeSlotMapper timeSlotMapper;
     private final AppointmentOrderMapper orderMapper;
     private final DistributedLockTemplate lockTemplate;
+    private final HoldTimeoutTask holdTimeoutTask;
 
     /**
      * 分布式 ID：直接用 MyBatis-Plus 的 IdWorker（成熟库优先，ADR-016）。
@@ -62,6 +63,10 @@ public class AppointmentService {
         }
         try {
             persistHold(userId, slot, orderId);
+            // 主路径：投递 Hold 超时延迟消息（成熟库优先，ADR-016）
+            AppointmentOrder created = new AppointmentOrder();
+            created.setId(orderId);
+            holdTimeoutTask.scheduleExpire(created, HOLD_MINUTES * 60);
         } catch (RuntimeException e) {
             // 落库失败必须回补，否则余量泄漏
             luaService.rollback(userId, slotId, slot.getTechnicianId(), startTs, endTs, orderId, traceId, 1);

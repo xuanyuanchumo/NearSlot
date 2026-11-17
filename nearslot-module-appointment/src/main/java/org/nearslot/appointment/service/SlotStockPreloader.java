@@ -33,6 +33,13 @@ public class SlotStockPreloader {
             String.valueOf(slot.getCapacity() == null ? 1 : slot.getCapacity()));
     }
 
+    private final org.nearslot.appointment.service.HoldTimeoutTask holdTimeoutTask;
+
+    @Bean
+    public ApplicationRunner delayQueueConsumerStarter() {
+        return args -> holdTimeoutTask.startConsumer();
+    }
+
     @Bean
     public ApplicationRunner slotStockWarmUp() {
         return args -> {

@@ -11,32 +11,32 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * 全局异常处理（api/design.md §2/§3）。
+ * 全局异常处理器（命名对齐 PickNear / hmdp-plus 的 WebExceptionAdvice，
+ * 降低接手者认知成本，见 standards/library-first.md §3 第 4 项）。
  *
- * 为何必须有：本轮实测发现，未捕获的 BaseException 会被 Spring 默认的
- * /error 兜底渲染成 HTTP 500 + {"status":500}，与契约「业务失败返回 200 + code」
- * 严重不符，前端无法按码分流。此处统一转成 Result。
+ * 实测背景：未捕获的 BaseException 会被 Spring /error 渲染成 HTTP 500，
+ * 与契约「业务失败返回统一 Result」不符，前端无法按码分流。
  */
 @Slf4j
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class WebExceptionAdvice {
 
-    /** 业务异常：按码段决定 HTTP 状态，body 始终为统一响应体。 */
+    /** 业务异常：按码段映射 HTTP 状态，body 恒为统一响应体。 */
     @ExceptionHandler(BaseException.class)
-    public Result<Void> handleBase(BaseException e, HttpServletResponse response) {
+    public Result<Void> handleBiz(BaseException e, HttpServletResponse response) {
         BaseCode code = e.getCode();
-        // 认证/限流类走对应 HTTP 状态；业务类保持 200 由前端按 code 分流
-        if (code.getCode() / 100 == 401) {
+        int segment = code.getCode() / 100;
+        if (segment == 401) {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setHeader("X-Auth-Reason", "no-session");
-        } else if (code.getCode() / 100 == 429) {
+        } else if (segment == 429) {
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         }
         log.warn("业务异常 code={} msg={}", code.getCode(), e.getMessage());
         return Result.fail(code, e.getMessage());
     }
 
-    /** 参数校验失败 → 501 段前的通用 400 语义，仍返回统一体。 */
+    /** 参数校验失败。 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<Void> handleValidation(MethodArgumentNotValidException e, HttpServletResponse response) {
         String msg = e.getBindingResult().getFieldErrors().stream()
@@ -46,10 +46,10 @@ public class GlobalExceptionHandler {
         return Result.fail(BaseCode.INTERNAL_ERROR, msg);
     }
 
-    /** 兜底：未知异常记日志并返回系统错误码。 */
-    @ExceptionHandler(Exception.class)
-    public Result<Void> handleOther(Exception e, HttpServletResponse response) {
-        log.error("未捕获异常", e);
+    /** 运行时异常兜底。 */
+    @ExceptionHandler(RuntimeException.class)
+    public Result<Void> handleRuntime(RuntimeException e, HttpServletResponse response) {
+        log.error("未捕获运行时异常", e);
         response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
         return Result.fail(BaseCode.INTERNAL_ERROR);
     }
