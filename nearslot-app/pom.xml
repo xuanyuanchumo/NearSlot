@@ -18,6 +18,9 @@
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
     <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>
     <dependency><groupId>com.baizhukui</groupId><artifactId>knife4j-openapi3-boot4-spring-boot-starter</artifactId><version>${knife4j.version}</version></dependency>
+    <!-- MyBatis-Plus 分页/防全表插件所在模块（3.5.9+ 从 extension 拆出，starter 不传递）。
+         只在 app 引入：各业务模块只用 BaseMapper，不需要分页拦截器本身。 -->
+    <dependency><groupId>com.baomidou</groupId><artifactId>mybatis-plus-jsqlparser</artifactId></dependency>
   </dependencies>
   <build><plugins>
     <plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId><version>${spring-boot.version}</version>

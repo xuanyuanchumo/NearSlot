@@ -13,6 +13,16 @@ local ttl, capacity = tonumber(ARGV[8]), tonumber(ARGV[9])
 -- nowTs 由服务端传入（Lua 里取 TIME 会与 Java 侧判定口径分裂，故统一由调用方给）
 local nowTs = tonumber(ARGV[10])
 
+-- ============================================================
+-- 关键约束（2026-11-17 实测踩坑）：Redis 禁止「非确定性命令之后写数据」。
+-- 原先脚本在 DECR/SADD 之后调用 redis.call("TIME") 取时间戳，
+-- 在副本/多节点环境直接报错：
+--   "Write commands not allowed after non deterministic commands"
+-- 结果所有抢约 500。现改为：**先把时间戳拿到**，再进入任何写操作。
+-- （此处 ts 仅用于审计日志，可由服务端 nowTs 推导，无需再调 TIME）
+-- ============================================================
+local nowSec = math.floor(nowTs / 1000)
+
 -- 检查 0：时间闸（此前 BaseCode 定义了 10002/10003 却从未校验，已过期时段仍可下单）
 if nowTs and nowTs >= endTs then return cjson.encode({code = 10003}) end
 if nowTs and nowTs >= startTs then return cjson.encode({code = 10002}) end
@@ -25,9 +35,6 @@ end
 -- 检查 2：技师时间轴重叠（标准区间相交：otherStart < newEnd 且 otherEnd > newStart）
 -- member 格式 "slotId#endsAt"：同一 slot 的并发请求由此跳过，
 -- 避免「同一时段余量竞争」被误判为「时段被占」。
--- **修复（2026-11-17 审计，Major）**：此前上界写死为 newStart，
--- 导致「已占 10:00-12:00、新约 09:00-10:30」这类被覆盖区间漏判，技师可被重复预约。
--- 现改为按 newEnd 取候选（不含），再用 otherEnd > newStart 做标准相交判定。
 local conflicts = redis.call("ZRANGEBYSCORE", timelineKey, "-inf", "(" .. endTs)
 for _, member in ipairs(conflicts) do
   local sep = string.find(member, "#")
@@ -65,7 +72,7 @@ end
 
 -- 审计 trace：扣减事实与业务动作同事务写入（对账以此为准）
 local entry = cjson.encode({
-  logType = 1, ts = tonumber(redis.call("TIME")[1]), orderId = orderId,
+  logType = 1, ts = nowSec, orderId = orderId,
   traceId = traceId, userId = userId, slotId = slotId,
   beforeQty = before, changeQty = 1, afterQty = after
 })

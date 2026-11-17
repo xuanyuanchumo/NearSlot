@@ -54,6 +54,8 @@ public class AppointmentService {
      */
     private final ApplicationEventPublisher eventPublisher;
     private final AppointmentLuaService luaService;
+    /** 核销码作废（FR-6.1）：取消路径必须同步作废，否则存在"已退款仍可核销"的资损口。 */
+    private final VoucherService voucherService;
 
     @Idempotent(key = "#userId + ':' + #slotId", ttl = 10)
     public Long book(Long userId, Long slotId) {
@@ -135,6 +137,9 @@ public class AppointmentService {
             rb.success() ? "cancel rollback" : "cancel rollback failed code=" + rb.getCode());
         log.info("cancel ok userId={} orderId={} traceId={} rollbackSuccess={}",
             userId, orderId, traceId, rb.success());
+
+        // FR-6.1：取消后作废核销码，防止"钱退了还能到店核销"
+        voucherService.voidForOrder(orderId);
 
         // FR-3.2 余量回流：取消后异步提升队首候补（不阻塞取消端点）
         if (rb.success()) {

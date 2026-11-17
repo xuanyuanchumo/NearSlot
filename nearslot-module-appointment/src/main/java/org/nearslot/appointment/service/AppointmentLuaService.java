@@ -80,7 +80,10 @@ public class AppointmentLuaService {
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(orderId), String.valueOf(traceId),
             String.valueOf(operate), "86400", String.valueOf(endTs),
-            String.valueOf(Math.max(capacity, 1)));
+            String.valueOf(Math.max(capacity, 1)),
+            // ARGV[11] nowTs：脚本据此计算审计时间戳，
+            // 避免在写操作之后再调 TIME（Redis 禁止非确定性命令后写数据，实测直接 500）。
+            String.valueOf(System.currentTimeMillis()));
         return parse(raw);
     }
 

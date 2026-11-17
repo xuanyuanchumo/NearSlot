@@ -53,12 +53,15 @@ public class ReconciliationTask {
 
     @Scheduled(fixedDelay = RECONCILE_INTERVAL_MS)
     public void reconcile() {
-        List<AppointmentOrder> pending = orderMapper.selectList(
+        // 用 MP Page 代替手拼 LIMIT（BATCH_SIZE 是常量，但仍应走插件统一出口）
+        var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<AppointmentOrder>(
+            1, BATCH_SIZE);
+        List<AppointmentOrder> pending = orderMapper.selectPage(page,
             Wrappers.<AppointmentOrder>lambdaQuery()
                 .and(w -> w.isNull(AppointmentOrder::getReconcileStatus)
                            .or().eq(AppointmentOrder::getReconcileStatus,
                                     ReconcileStatus.PENDING.getCode()))
-                .last("LIMIT " + BATCH_SIZE));
+                .orderByAsc(AppointmentOrder::getId)).getRecords();
         if (pending.isEmpty()) return;
 
         int consistent = 0, abnormal = 0, inFlight = 0;

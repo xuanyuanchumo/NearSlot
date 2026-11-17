@@ -49,6 +49,7 @@ class AppointmentServiceTest {
     private UserLevelQuery userLevelQuery;
     private ApplicationEventPublisher eventPublisher;
     private AppointmentLuaService luaService;
+    private VoucherService voucherService;
     private AppointmentService service;
 
     @BeforeEach
@@ -61,9 +62,10 @@ class AppointmentServiceTest {
         userLevelQuery = mock(UserLevelQuery.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         luaService = mock(AppointmentLuaService.class);
+        voucherService = mock(VoucherService.class);
         // 构造器顺序严格对齐 @RequiredArgsConstructor 的字段声明顺序
         service = new AppointmentService(bookingCore, timeSlotMapper, orderMapper, holdTimeoutTask,
-            reconcileService, userLevelQuery, eventPublisher, luaService);
+            reconcileService, userLevelQuery, eventPublisher, luaService, voucherService);
     }
 
     private TimeSlot slot(Integer status, Integer minLevel) {

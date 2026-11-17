@@ -20,11 +20,11 @@ public class ShopController {
 
     @Operation(summary = "服务商列表", description = "分页返回，供前端首页加载")
     @GetMapping
-    public org.nearslot.common.Result<java.util.Map<String, Object>> list(
+    public Result<org.nearslot.common.page.PageResult<Shop>> list(
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "size", defaultValue = "10") int size,
             @RequestParam(value = "typeId", required = false) Long typeId) {
-        return org.nearslot.common.Result.ok(shopService.page(page, size, typeId));
+        return Result.ok(shopService.page(page, size, typeId));
     }
 
     @Operation(summary = "服务商详情", description = "缓存三防（布隆防穿透 + 空值缓存 + TTL Jitter）")

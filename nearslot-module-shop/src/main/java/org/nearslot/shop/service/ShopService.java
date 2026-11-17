@@ -75,19 +75,26 @@ public class ShopService {
         return cached;
     }
 
-    /** 服务商分页列表（前端首页）。 */
-    public java.util.Map<String, Object> page(int page, int size, Long typeId) {
+    /**
+     * 服务商分页列表（前端首页）。
+     *
+     * **2026-11-17 修正**：此前手写 `selectCount` + `.last("LIMIT x OFFSET y")` 两次查询，
+     * 且把用户传入的 size 直接拼进 SQL。现改用 MyBatis-Plus 的 {@link Page}，
+     * 由 PaginationInnerInterceptor 统一生成 count 与 limit，并受 maxLimit=500 保护。
+     * 同时把 size 上限交给插件而非在这里散落 clamp 逻辑。
+     */
+    public org.nearslot.common.page.PageResult<Shop> page(int page, int size, Long typeId) {
+        long current = Math.max(1L, page);
+        long pageSize = Math.max(1L, Math.min(size, 50L));
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<Shop>lambdaQuery();
         if (typeId != null) q.eq(Shop::getTypeId, typeId);
-        long total = shopMapper.selectCount(q);
-        q.last("LIMIT " + Math.max(1, Math.min(size, 50)) + " OFFSET " + Math.max(0, (page - 1) * size));
-        java.util.List<Shop> items = shopMapper.selectList(q);
-        java.util.Map<String, Object> res = new java.util.LinkedHashMap<>();
-        res.put("items", items);
-        res.put("total", total);
-        res.put("page", page);
-        res.put("size", size);
-        return res;
+        q.orderByAsc(Shop::getId);
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Shop> p =
+            shopMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(current, pageSize), q);
+        // 统一分页结构（common/page/PageResult），不再手拼 Map：
+        // Map 在 OpenAPI 里是 object，前端拿不到字段类型，只能手写 any。
+        return org.nearslot.common.page.PageResult.ofPage(
+            p.getRecords(), p.getTotal(), p.getCurrent(), p.getSize(), p.getPages());
     }
 
     /** 服务商的技师列表。 */

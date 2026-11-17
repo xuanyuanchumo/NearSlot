@@ -53,6 +53,8 @@ public class PaymentService {
     private final StringRedisTemplate redis;
     private final TechRankService techRankService;
     private final PrepareReminderService prepareReminderService;
+    /** 核销码（FR-6.1）：支付成功签发，取消/退款作废。 */
+    private final VoucherService voucherService;
 
     /**
      * 支付成功回调。
@@ -144,6 +146,13 @@ public class PaymentService {
         // "ABNORMAL=0" 的 Phase 2 出口标准永远不可能达成。
         // 库存事实只由 Lua 的 book/rollback 产生。
         // ============================================================
+
+        // FR-6.1 履约核销：支付成功才签发核销码（到店/上门出示，商家核销 → 订单转 DONE）。
+        // 注意：这里的 order 是**更新前**读出的快照，status 仍是 PENDING；
+        // 必须显式同步成 CONFIRMED，否则 issueForOrder 的状态闸会把它当成
+        // "未确认订单"直接跳过 —— 实测症状是"订单已确认但永远没有核销码"。
+        order.setStatus(OrderStatus.CONFIRMED.getCode());
+        voucherService.issueForOrder(order);
 
         // FR-4.3：支付成功才计入热门技师榜（避免取消/超时造成虚高）
         techRankService.recordDeal(order.getShopId(), order.getServiceStaffId(),

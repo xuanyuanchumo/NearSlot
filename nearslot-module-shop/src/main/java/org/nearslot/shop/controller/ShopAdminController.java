@@ -8,6 +8,7 @@ import org.nearslot.shop.entity.ServiceItem;
 import org.nearslot.shop.entity.Shop;
 import org.nearslot.shop.entity.Technician;
 import org.nearslot.shop.service.ShopAdminService;
+import org.nearslot.common.page.PageResult;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -66,6 +67,61 @@ public class ShopAdminController {
     public Result<Void> deleteTechnician(@PathVariable("id") Long id) {
         adminService.deleteTechnician(id);
         return Result.ok(null);
+    }
+
+    // ---------- 分页列表 ----------
+
+    @Operation(summary = "技师分页列表", description = "管理端；可选按在岗状态过滤，需店铺归属")
+    @GetMapping("/technicians")
+    public Result<PageResult<Technician>> pageTechnicians(
+            @RequestParam("shopId") Long shopId,
+            @RequestParam(value = "workStatus", required = false) Integer workStatus,
+            @RequestParam(value = "page", defaultValue = "1") long page,
+            @RequestParam(value = "size", defaultValue = "20") long size) {
+        return Result.ok(adminService.pageTechnicians(shopId, workStatus, page, size));
+    }
+
+    @Operation(summary = "服务项分页列表", description = "管理端；可选按 itemType(SERVICE/PRODUCT) 过滤")
+    @GetMapping("/service-items")
+    public Result<PageResult<ServiceItem>> pageServiceItems(
+            @RequestParam("shopId") Long shopId,
+            @RequestParam(value = "itemType", required = false) String itemType,
+            @RequestParam(value = "page", defaultValue = "1") long page,
+            @RequestParam(value = "size", defaultValue = "20") long size) {
+        return Result.ok(adminService.pageServiceItems(shopId, itemType, page, size));
+    }
+
+    // ---------- 技师-技能关联（FR-2.4） ----------
+
+    @Operation(summary = "技师技能列表", description = "返回该技师可提供的服务项（含名称/时长/价格/熟练度）")
+    @GetMapping("/technicians/{id}/skills")
+    public Result<java.util.List<java.util.Map<String, Object>>> listSkills(@PathVariable("id") Long id) {
+        return Result.ok(adminService.listSkills(id));
+    }
+
+    @Operation(summary = "绑定技师技能", description = "幂等：已存在则更新熟练度；服务项与技师必须同店")
+    @PostMapping("/technicians/{id}/skills")
+    public Result<Long> bindSkill(@PathVariable("id") Long id,
+                                  @RequestBody BindSkillRequest req) {
+        return Result.ok(adminService.bindSkill(id, req.getServiceItemId(), req.getProficiency()));
+    }
+
+    @Operation(summary = "解绑技师技能")
+    @DeleteMapping("/technicians/{id}/skills/{serviceItemId}")
+    public Result<Void> unbindSkill(@PathVariable("id") Long id,
+                                    @PathVariable("serviceItemId") Long serviceItemId) {
+        adminService.unbindSkill(id, serviceItemId);
+        return Result.ok(null);
+    }
+
+    /** 绑定技能请求体。 */
+    @io.swagger.v3.oas.annotations.media.Schema(description = "绑定技师技能请求")
+    @lombok.Data
+    public static class BindSkillRequest {
+        @jakarta.validation.constraints.NotNull(message = "serviceItemId 不能为空")
+        private Long serviceItemId;
+        /** 熟练度 1-5，缺省 3。 */
+        private Integer proficiency;
     }
 
     // ---------- 服务项 ----------

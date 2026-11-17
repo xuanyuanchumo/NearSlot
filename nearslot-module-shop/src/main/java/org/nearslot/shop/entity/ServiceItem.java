@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import org.nearslot.framework.mybatis.BaseEntity;
 
 /** 服务项（FR-2.1 管理）。 */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("service_item")
-public class ServiceItem {
+public class ServiceItem extends BaseEntity {
     @TableId(type = IdType.INPUT)
     private Long id;
     private Long shopId;

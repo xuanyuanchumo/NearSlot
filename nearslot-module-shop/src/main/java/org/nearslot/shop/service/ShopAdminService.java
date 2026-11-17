@@ -11,11 +11,13 @@ import org.nearslot.framework.cache.RedisConstants;
 import org.nearslot.framework.id.IdGenerator;
 import org.nearslot.framework.mq.CacheInvalidationPublisher;
 import org.nearslot.shop.entity.ServiceItem;
+import org.nearslot.shop.entity.TechnicianSkill;
 import org.nearslot.shop.entity.Shop;
 import org.nearslot.shop.entity.Technician;
 import org.nearslot.shop.mapper.ServiceItemMapper;
 import org.nearslot.shop.mapper.ShopMapper;
 import org.nearslot.shop.mapper.TechnicianMapper;
+import org.nearslot.shop.mapper.TechnicianSkillMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -48,6 +50,7 @@ public class ShopAdminService {
     private final BloomFilterHandler bloomFilter;
     private final CacheInvalidationPublisher invalidationPublisher;
     private final CacheManager cacheManager;
+    private final TechnicianSkillMapper technicianSkillMapper;
 
     // ---------- 服务商 ----------
     @Transactional(rollbackFor = Exception.class)
@@ -135,6 +138,122 @@ public class ShopAdminService {
         requireShopOwner(old.getShopId());
         serviceItemMapper.deleteById(id);
         afterChange(old.getShopId());
+    }
+
+    // ---------- 分页查询（管理端列表） ----------
+
+    /**
+     * 技师分页列表。
+     *
+     * 用 MyBatis-Plus Page 而非手拼 LIMIT：分页插件统一生成 count，
+     * 且受 maxLimit 保护（客户端传 size=100000 也打不垮 DB）。
+     * 可选按在岗状态过滤——运营最常问的就是"我店里还有几个在岗"。
+     */
+    public org.nearslot.common.page.PageResult<Technician> pageTechnicians(
+            Long shopId, Integer workStatus, long page, long size) {
+        requireShopOwner(shopId);
+        var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<Technician>lambdaQuery()
+            .eq(Technician::getShopId, shopId);
+        if (workStatus != null) q.eq(Technician::getWorkStatus, workStatus);
+        q.orderByAsc(Technician::getId);
+        var p = technicianMapper.selectPage(
+            new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size), q);
+        return org.nearslot.common.page.PageResult.ofPage(
+            p.getRecords(), p.getTotal(), p.getCurrent(), p.getSize(), p.getPages());
+    }
+
+    /** 服务项分页列表（按 itemType 过滤：SERVICE 服务 / PRODUCT 商品）。 */
+    public org.nearslot.common.page.PageResult<ServiceItem> pageServiceItems(
+            Long shopId, String itemType, long page, long size) {
+        requireShopOwner(shopId);
+        var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<ServiceItem>lambdaQuery()
+            .eq(ServiceItem::getShopId, shopId);
+        if (itemType != null && !itemType.isBlank()) q.eq(ServiceItem::getItemType, itemType);
+        q.orderByAsc(ServiceItem::getId);
+        var p = serviceItemMapper.selectPage(
+            new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size), q);
+        return org.nearslot.common.page.PageResult.ofPage(
+            p.getRecords(), p.getTotal(), p.getCurrent(), p.getSize(), p.getPages());
+    }
+
+    // ---------- 技师-技能关联（FR-2.4 / business-domain.md §3） ----------
+
+    /**
+     * 给技师绑定技能（幂等：已存在则更新熟练度）。
+     *
+     * 业务必要性：没有这层关联，"用户选了肩颈推拿却被分配只会美甲的技师"。
+     * 唯一键 uk_tech_skill(technician_id, service_item_id) 由 DB 兜底，
+     * 这里先查后写把"重复绑定"转成"更新熟练度"，避免依赖异常处理。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Long bindSkill(Long technicianId, Long serviceItemId, Integer proficiency) {
+        Technician tech = technicianMapper.selectById(technicianId);
+        requireExists(technicianId, tech);
+        requireShopOwner(tech.getShopId());
+        ServiceItem item = serviceItemMapper.selectById(serviceItemId);
+        requireExists(serviceItemId, item);
+        if (!item.getShopId().equals(tech.getShopId())) {
+            // 跨店铺绑定会让"按服务项筛技师"把别家的技师筛出来
+            throw new BaseException(BaseCode.BAD_REQUEST, "服务项与技师不属于同一店铺");
+        }
+        int prof = proficiency == null ? 3 : Math.max(1, Math.min(proficiency, 5));
+        var existing = technicianSkillMapper.selectOne(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TechnicianSkill>lambdaQuery()
+                .eq(TechnicianSkill::getTechnicianId, technicianId)
+                .eq(TechnicianSkill::getServiceItemId, serviceItemId));
+        if (existing != null) {
+            existing.setProficiency(prof);
+            technicianSkillMapper.updateById(existing);
+            log.info("技能绑定已存在，更新熟练度 technicianId={} itemId={} prof={}",
+                technicianId, serviceItemId, prof);
+            return existing.getId();
+        }
+        TechnicianSkill skill = new TechnicianSkill();
+        skill.setId(IdGenerator.nextId());
+        skill.setTechnicianId(technicianId);
+        skill.setServiceItemId(serviceItemId);
+        skill.setProficiency(prof);
+        technicianSkillMapper.insert(skill);
+        log.info("技能绑定完成 technicianId={} itemId={} prof={}", technicianId, serviceItemId, prof);
+        return skill.getId();
+    }
+
+    /** 解绑技能（归属校验基于技师所属店铺）。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void unbindSkill(Long technicianId, Long serviceItemId) {
+        Technician tech = technicianMapper.selectById(technicianId);
+        requireExists(technicianId, tech);
+        requireShopOwner(tech.getShopId());
+        technicianSkillMapper.delete(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TechnicianSkill>lambdaQuery()
+                .eq(TechnicianSkill::getTechnicianId, technicianId)
+                .eq(TechnicianSkill::getServiceItemId, serviceItemId));
+    }
+
+    /** 查询某技师的技能（含服务项名，便于管理端直接展示）。 */
+    public java.util.List<java.util.Map<String, Object>> listSkills(Long technicianId) {
+        Technician tech = technicianMapper.selectById(technicianId);
+        requireExists(technicianId, tech);
+        requireShopOwner(tech.getShopId());
+        var skills = technicianSkillMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<TechnicianSkill>lambdaQuery()
+                .eq(TechnicianSkill::getTechnicianId, technicianId));
+        // 批量取服务项，避免循环内查库（N+1）
+        java.util.List<Long> itemIds = skills.stream().map(TechnicianSkill::getServiceItemId).toList();
+        java.util.Map<Long, ServiceItem> items = itemIds.isEmpty() ? java.util.Map.of()
+            : serviceItemMapper.selectBatchIds(itemIds).stream()
+                .collect(java.util.stream.Collectors.toMap(ServiceItem::getId, i -> i));
+        return skills.stream().map(sk -> {
+            ServiceItem it = items.get(sk.getServiceItemId());
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", String.valueOf(sk.getId()));
+            m.put("serviceItemId", String.valueOf(sk.getServiceItemId()));
+            m.put("serviceItemName", it == null ? "" : it.getName());
+            m.put("durationMin", it == null ? 0 : it.getDurationMin());
+            m.put("priceCent", it == null ? 0 : it.getPriceCent());
+            m.put("proficiency", sk.getProficiency());
+            return m;
+        }).toList();
     }
 
     /** 角色闸：仅商家/平台可管理。 */
