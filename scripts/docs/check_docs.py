@@ -7,10 +7,10 @@
   C2 链接可达：正文相对链接目标存在（http/mailto/tel/锚点除外）。
   C3 current 可达：每份 current 文档可从最近的目录 README.md 到达；legacy 不得被 README 链接。
   C4 source_of_truth 存在：路径以仓库根为基准解析（REPO_ROOT / source）。
-  C5 source_of_truth 被 Git 跟踪（工作区未纳入 Git 时自动降级为警告，不算失败）。
+  C5 source_of_truth 被 Git 跟踪（docs 独立仓库时用 docs_root 作 repo root；无 Git 时降级为警告）。
   C6 superseded_by 路径存在。
 
-判据：C1-C4/C6 任一失败 -> 非零退出码；C5 在无 Git 仓库时跳过。
+判据：C1-C4/C6 任一失败 -> 非零退出码；C5 在无 Git 仓库时跳过；docs 有独立 .git 时以 docs_root 为 C5 仓库根。
 用法：python check_docs.py <docs根目录> [--repo-root <仓库根>] [--skip-c3]
 """
 from __future__ import annotations
@@ -99,7 +99,12 @@ def module_readme(path: Path, docs_root: Path):
 
 
 def git_tracked(path: Path, repo_root: Path):
-    rel = path.relative_to(repo_root).as_posix()
+    try:
+        rel = path.relative_to(repo_root).as_posix()
+    except ValueError:
+        # 事实源不在该仓库工作树内（例如 docs 独立仓库里指向主仓库源码）：
+        # 用绝对路径询问 git；git 会将其判为未跟踪，避免 relative_to 抛异常。
+        rel = str(path)
     r = subprocess.run(["git", "ls-files", "--error-unmatch", "--", rel],
                        cwd=repo_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return r.returncode == 0
@@ -114,6 +119,13 @@ def main():
     docs_root = args.docs_root.resolve()
     repo_root = (args.repo_root or docs_root.parent).resolve()
     has_git = (repo_root / ".git").exists()
+
+    # C5 专用仓库根：docs 独立 Git 仓库场景下，事实源属于 docs 仓库而非
+    # --repo-root 指定的主仓库（主仓库通常忽略 docs/），必须以 docs_root 为准。
+    # docs_root 无独立 .git 时沿用 repo_root，保持 --repo-root 旧用法兼容。
+    docs_has_git = (docs_root / ".git").exists()
+    c5_repo_root = docs_root if docs_has_git else repo_root
+    c5_has_git = docs_has_git or has_git
 
     md_files = sorted(docs_root.rglob("*.md"))
     errors: list = []
@@ -148,7 +160,7 @@ def main():
             sp = (path.parent / src).resolve()
             if not sp.exists():
                 errors.append(f"{rel}: C4 事实源不存在 {src}")
-            elif has_git and not git_tracked(sp, repo_root):
+            elif c5_has_git and not git_tracked(sp, c5_repo_root):
                 errors.append(f"{rel}: C5 事实源未被 Git 跟踪 {src}")
         for rep in as_paths(fm.get("superseded_by")):
             if not (path.parent / rep).resolve().exists():

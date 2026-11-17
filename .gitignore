@@ -33,6 +33,8 @@ Thumbs.db
 # --- 观测/临时 ---
 /tmp/
 *.tmp
+__pycache__/
+*.pyc
 
 # --- 项目文档（独立 Git 管理，不提交到代码仓库远程）---
 docs/
