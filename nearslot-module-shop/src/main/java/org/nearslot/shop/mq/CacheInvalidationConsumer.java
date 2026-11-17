@@ -57,7 +57,7 @@ public class CacheInvalidationConsumer {
         if (cacheKey == null || cacheKey.isBlank()) return;
         lockTemplate.withWriteLock("nearslot:lock:cache:" + cacheKey, () -> {
             cacheManager.invalidate(cacheKey);
-            log.debug("本地缓存已失效 key={}", cacheKey);
+            log.info("收到广播并失效本地缓存 key={}", cacheKey);
             return null;
         });
     }

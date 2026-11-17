@@ -33,7 +33,7 @@ public class CacheInvalidationPublisher {
     public boolean publish(String cacheKey) {
         try {
             rabbitTemplate.convertAndSend(RabbitMqConfig.INVALIDATION_FANOUT, "", cacheKey);
-            log.debug("缓存失效广播已发送 key={}", cacheKey);
+            log.info("缓存失效广播已发送 key={}", cacheKey);
             return true;
         } catch (RuntimeException e) {
             log.warn("缓存失效广播失败（MQ 不可用）key={}，调用方需本地降级", cacheKey);

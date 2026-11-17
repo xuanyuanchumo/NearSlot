@@ -17,6 +17,10 @@ spring:
       mode: always
       schema-locations: classpath:verify-schema.sql
   rabbitmq:
+    host: localhost
+    port: 45672
+    username: ${RABBITMQ_USER:nearslot}
+    password: ${RABBITMQ_PASSWORD:}
     connection-timeout: 3s
     listener:
       simple:
@@ -29,7 +33,8 @@ server:
 # （实测：MQ 缺失时 @RabbitListener 每 5s 重连刷 ERROR 日志）
 nearslot:
   mq:
-    invalidation-enabled: false
+    # 本地已起 RabbitMQ 时开启，用于验证真实广播链路
+    invalidation-enabled: ${MQ_INVALIDATION_ENABLED:false}
   admin:
     token: ""
 
