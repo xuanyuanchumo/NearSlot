@@ -51,6 +51,9 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
                 return true;
             }
             UserHolder.set(userId);
+            // 多租户上下文：角色 + 归属店铺（供管理端鉴权与数据隔离）
+            UserHolder.setRole(tokenService.roleOf(token));
+            UserHolder.setShopId(tokenService.shopIdOf(token));
         } catch (RuntimeException e) {
             response.setHeader("X-Auth-Reason", "no-session");
         } finally {

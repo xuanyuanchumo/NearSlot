@@ -33,8 +33,9 @@ public class SlotController {
     @GetMapping
     public Result<java.util.List<java.util.Map<String, Object>>> listByShop(
             @RequestParam("shopId") Long shopId,
-            @RequestParam(value = "date", required = false) String date) {
-        return Result.ok(slotPublishService.listAvailable(shopId, date));
+            @RequestParam(value = "date", required = false) String date,
+            @RequestParam(value = "serviceItemId", required = false) Long serviceItemId) {
+        return Result.ok(slotPublishService.listAvailable(shopId, date, serviceItemId));
     }
 
     @Operation(summary = "关闭时段", description = "状态置关闭 + 删余量 + 广播")

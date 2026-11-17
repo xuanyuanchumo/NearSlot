@@ -38,6 +38,7 @@ public class SlotPublishService {
     private final CacheInvalidationPublisher invalidationPublisher;
     private final DistributedLockTemplate lockTemplate;
     private final ReminderService reminderService;
+    private final org.nearslot.common.api.StaffSkillQuery staffSkillQuery;
     private final org.nearslot.framework.cache.CacheManager cacheManager;
 
     /** 发布时段（幂等）。 */
@@ -97,7 +98,13 @@ public class SlotPublishService {
      * 查询可约时段（前端选时段用）。
      * 返回时段基本信息 + 实时余量（从 Redis 读，读不到回落 capacity）。
      */
-    public java.util.List<java.util.Map<String, Object>> listAvailable(Long shopId, String date) {
+    public java.util.List<java.util.Map<String, Object>> listAvailable(Long shopId, String date, Long serviceItemId) {
+        // 按服务项筛选能做该项目的服务者（业务域澄清：先选项目再选人）
+        java.util.Set<Long> allowedStaff = null;
+        if (serviceItemId != null) {
+            allowedStaff = staffSkillQuery.staffIdsByItem(serviceItemId);
+            if (allowedStaff == null || allowedStaff.isEmpty()) return java.util.List.of();
+        }
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<TimeSlot>lambdaQuery()
             .eq(TimeSlot::getShopId, shopId)
             .eq(TimeSlot::getStatus, 1)
@@ -108,6 +115,7 @@ public class SlotPublishService {
         for (TimeSlot s : slots) {
             if (date != null && s.getStartsAt() != null
                 && !s.getStartsAt().toLocalDate().toString().equals(date)) continue;
+            if (allowedStaff != null && !allowedStaff.contains(s.getTechnicianId())) continue;
             String stock = redis.opsForValue().get(RedisConstants.SLOT_STOCK + s.getId());
             java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", String.valueOf(s.getId()));       // 字符串防精度丢失（ADR-012）

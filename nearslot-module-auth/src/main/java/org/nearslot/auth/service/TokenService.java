@@ -32,6 +32,7 @@ public class TokenService {
 
     private final StringRedisTemplate redis;
     private final SecretKey jwtKey;
+    private final org.nearslot.auth.mapper.UserRoleMapper userRoleMapper;
 
     private DefaultRedisScript<Long> script(String text) {
         DefaultRedisScript<Long> s = new DefaultRedisScript<>();
@@ -62,13 +63,55 @@ public class TokenService {
     }
 
     private String buildAccessToken(Long userId, Long version) {
-        return Jwts.builder()
+        // 角色与归属写入 JWT（多租户平台 P0 安全）：管理端据此鉴权与数据隔离
+        String role = "CONSUMER";
+        Long shopId = null;
+        try {
+            var roles = userRoleMapper.selectList(
+                com.baomidou.mybatisplus.core.toolkit.Wrappers.<org.nearslot.auth.entity.UserRole>lambdaQuery()
+                    .eq(org.nearslot.auth.entity.UserRole::getUserId, userId));
+            if (roles != null && !roles.isEmpty()) {
+                // 签一个最高权限角色（演示用户同时有 CONSUMER/PLATFORM）
+                var r = roles.stream()
+                    .filter(x -> "PLATFORM".equals(x.getRole())).findFirst()
+                    .orElse(roles.get(0));
+                role = r.getRole();
+                shopId = r.getShopId();
+            }
+        } catch (RuntimeException e) {
+            // Token 签发不因角色查询失败而中断；默认 CONSUMER 最小权限
+        }
+        var b = Jwts.builder()
             .subject(String.valueOf(userId))
             .claim("version", version)
-            .issuedAt(new Date())
+            .claim("role", role);
+        if (shopId != null) b.claim("shopId", shopId);
+        return b.issuedAt(new Date())
             .expiration(new Date(System.currentTimeMillis() + AT_TTL_SECONDS * 1000))
             .signWith(jwtKey)
             .compact();
+    }
+
+    /** 从 AT 取角色 claim。 */
+    public String roleOf(String token) {
+        try {
+            Object v = Jwts.parser().verifyWith(jwtKey).build()
+                .parseSignedClaims(token).getPayload().get("role");
+            return v == null ? "CONSUMER" : String.valueOf(v);
+        } catch (RuntimeException e) {
+            return "CONSUMER";
+        }
+    }
+
+    /** 从 AT 取归属店铺 claim；无则 null。 */
+    public Long shopIdOf(String token) {
+        try {
+            Object v = Jwts.parser().verifyWith(jwtKey).build()
+                .parseSignedClaims(token).getPayload().get("shopId");
+            return v == null ? null : Long.valueOf(String.valueOf(v));
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** 校验 AT 的 JWT 合法性（版本校验由拦截器读 Redis 完成）。 */

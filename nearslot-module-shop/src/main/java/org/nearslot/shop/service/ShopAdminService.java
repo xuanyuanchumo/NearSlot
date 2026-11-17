@@ -2,6 +2,7 @@ package org.nearslot.shop.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.nearslot.common.context.UserHolder;
 import org.nearslot.common.enums.BaseCode;
 import org.nearslot.common.exception.BaseException;
 import org.nearslot.framework.bloom.BloomFilterHandler;
@@ -20,9 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 服务商/技师/服务项管理（FR-2.1）。
  *
- * 新增服务商时必须同步布隆过滤器（put），否则新建的服务商详情会被
- * "布隆拦截"误判为不存在（research/13 踩坑：布隆空集合=全否定）。
- * 同时广播缓存失效，避免其他实例返回旧列表。
+ * 多租户安全（P0）：
+ *   1. 仅 MERCHANT / PLATFORM 角色可管理（CONSUMER/STAFF 拒绝）；
+ *   2. MERCHANT 只能操作自己的 shopId（数据归属校验）；
+ *   3. 新增服务商时同步布隆过滤器（否则详情被误判不存在）。
  */
 @Slf4j
 @Service
@@ -38,9 +40,10 @@ public class ShopAdminService {
     // ---------- 服务商 ----------
     @Transactional(rollbackFor = Exception.class)
     public Long createShop(Shop shop) {
+        requireAdmin();
         shop.setId(IdGenerator.nextId());
         shopMapper.insert(shop);
-        bloomFilter.put("shop", String.valueOf(shop.getId()));  // 关键：同步布隆
+        bloomFilter.put("shop", String.valueOf(shop.getId()));
         afterChange();
         log.info("服务商已创建 shopId={}", shop.getId());
         return shop.getId();
@@ -48,6 +51,7 @@ public class ShopAdminService {
 
     @Transactional(rollbackFor = Exception.class)
     public void updateShop(Shop shop) {
+        requireShopOwner(shop.getId());
         requireExists(shop.getId(), shopMapper.selectById(shop.getId()));
         shopMapper.updateById(shop);
         afterChange();
@@ -55,15 +59,15 @@ public class ShopAdminService {
 
     @Transactional(rollbackFor = Exception.class)
     public void deleteShop(Long id) {
+        requireShopOwner(id);
         requireExists(id, shopMapper.selectById(id));
         shopMapper.deleteById(id);
-        // 布隆过滤器不支持删除：标记逻辑删除即可；误判率随删除量缓慢上升，属可接受的最终一致
         afterChange();
-        log.info("服务商已删除 shopId={}", id);
     }
 
     // ---------- 技师 ----------
     public Long createTechnician(Technician t) {
+        requireShopOwner(t.getShopId());
         t.setId(IdGenerator.nextId());
         technicianMapper.insert(t);
         afterChange();
@@ -71,19 +75,24 @@ public class ShopAdminService {
     }
 
     public void updateTechnician(Technician t) {
-        requireExists(t.getId(), technicianMapper.selectById(t.getId()));
+        var old = technicianMapper.selectById(t.getId());
+        requireExists(t.getId(), old);
+        requireShopOwner(old.getShopId());
         technicianMapper.updateById(t);
         afterChange();
     }
 
     public void deleteTechnician(Long id) {
-        requireExists(id, technicianMapper.selectById(id));
+        var old = technicianMapper.selectById(id);
+        requireExists(id, old);
+        requireShopOwner(old.getShopId());
         technicianMapper.deleteById(id);
         afterChange();
     }
 
     // ---------- 服务项 ----------
     public Long createServiceItem(ServiceItem item) {
+        requireShopOwner(item.getShopId());
         item.setId(IdGenerator.nextId());
         serviceItemMapper.insert(item);
         afterChange();
@@ -91,15 +100,37 @@ public class ShopAdminService {
     }
 
     public void updateServiceItem(ServiceItem item) {
-        requireExists(item.getId(), serviceItemMapper.selectById(item.getId()));
+        var old = serviceItemMapper.selectById(item.getId());
+        requireExists(item.getId(), old);
+        requireShopOwner(old.getShopId());
         serviceItemMapper.updateById(item);
         afterChange();
     }
 
     public void deleteServiceItem(Long id) {
-        requireExists(id, serviceItemMapper.selectById(id));
+        var old = serviceItemMapper.selectById(id);
+        requireExists(id, old);
+        requireShopOwner(old.getShopId());
         serviceItemMapper.deleteById(id);
         afterChange();
+    }
+
+    /** 角色闸：仅商家/平台可管理。 */
+    private void requireAdmin() {
+        String role = UserHolder.role();
+        if (!"MERCHANT".equals(role) && !"PLATFORM".equals(role)) {
+            throw new BaseException(BaseCode.FORBIDDEN, "无管理权限 role=" + role);
+        }
+    }
+
+    /** 数据归属闸：商家只能操作自己的 shopId，平台不限。 */
+    private void requireShopOwner(Long targetShopId) {
+        requireAdmin();
+        if ("PLATFORM".equals(UserHolder.role())) return;
+        Long own = UserHolder.shopId();
+        if (own == null || !own.equals(targetShopId)) {
+            throw new BaseException(BaseCode.FORBIDDEN, "越权访问其他店铺数据");
+        }
     }
 
     private void requireExists(Long id, Object entity) {
@@ -108,7 +139,6 @@ public class ShopAdminService {
         }
     }
 
-    /** 变更后广播缓存失效（MQ 不可用时由 publisher 内部降级）。 */
     private void afterChange() {
         invalidationPublisher.publish(RedisConstants.PREFIX + "shop:list");
     }
