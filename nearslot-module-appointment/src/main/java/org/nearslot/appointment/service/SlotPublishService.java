@@ -68,16 +68,20 @@ public class SlotPublishService {
             String.valueOf(capacity), 24, TimeUnit.HOURS);
 
         // 广播失效：写锁串行化，避免与其他实例的重建并发
+        //
+        // **只广播 service 层旧缓存（shop 详情），绝不失效刚预热的余量键**。
+        // 实测踩坑（严重）：此前把 SLOT_STOCK 也一起 invalidate，导致
+        // "预热 -> 立刻删除" 的自毁逻辑，抢约永远返回 10004 无库存键。
+        // 新键本身就是最新值，失效它没有任何意义，只会删掉正确数据。
         lockTemplate.withWriteLock(RedisConstants.LOCK + "slot:publish:" + slot.getId(), () -> {
-            boolean okStock = invalidationPublisher.publish(RedisConstants.SLOT_STOCK + slot.getId());
-            boolean okShop = invalidationPublisher.publish(RedisConstants.CACHE_SHOP + shopId);
-            if (!okStock || !okShop) {
-                // MQ 不可用：降级为本地失效，保证本实例不会返回旧缓存；
-                // 其他实例依赖 TTL 自然过期（最终一致），并把风险写日志便于告警
-                cacheManager.invalidate(RedisConstants.SLOT_STOCK + slot.getId());
+            boolean ok = invalidationPublisher.publish(RedisConstants.CACHE_SHOP + shopId);
+            if (!ok) {
+                // MQ 不可用：降级为本实例失效 shop 缓存；其他实例依赖 TTL（最终一致）
                 cacheManager.invalidate(RedisConstants.CACHE_SHOP + shopId);
-                log.warn("失效广播不可用，已降级为本地失效（其他实例依赖 TTL）slotId={}", slot.getId());
+                log.warn("失效广播不可用，已降级为本地失效（其他实例依赖 TTL）shopId={}", shopId);
             }
+            // 广播已预热余量键这件事本身（通知其他实例刷新，而非删除）
+            invalidationPublisher.publish(RedisConstants.PREFIX + "slot:published:" + slot.getId());
             return null;
         });
 

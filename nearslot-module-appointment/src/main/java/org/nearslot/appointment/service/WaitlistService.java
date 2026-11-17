@@ -39,6 +39,9 @@ public class WaitlistService {
     private static final long TTL_SECONDS = 86400L;
 
     private final StringRedisTemplate redis;
+    private final org.nearslot.appointment.mapper.TimeSlotMapper timeSlotMapper;
+    /** 等级校验走 common 接口（C-ARCH-01，不直接依赖 auth）。 */
+    private final org.nearslot.common.api.UserLevelQuery userLevelQuery;
 
     /** 加入候补：Set 幂等 + ZSet 排序 + Hash 状态（三键原子性由脚本外的顺序写保证）。 */
     public long join(long slotId, long userId) {
@@ -46,6 +49,22 @@ public class WaitlistService {
         String setKey = RedisConstants.SUBSCRIBE_USER + slotId;
         String zsetKey = RedisConstants.SUBSCRIBE_ZSET + slotId;
         String statusKey = RedisConstants.SUBSCRIBE_STATUS + slotId;
+
+        // 0) 等级过滤（FR-3.2 / research/09b $1：候选需满足时段等级门槛）
+        var slot = timeSlotMapper.selectById(slotId);
+        if (slot == null) {
+            throw new org.nearslot.common.exception.BaseException(
+                org.nearslot.common.enums.BaseCode.NOT_FOUND);
+        }
+        int minLevel = slot.getMinLevel() == null ? 0 : slot.getMinLevel();
+        if (minLevel > 0) {
+            int userLevel = userLevelQuery.levelOf(userId);
+            if (userLevel < minLevel) {
+                throw new org.nearslot.common.exception.BaseException(
+                    org.nearslot.common.enums.BaseCode.LEVEL_NOT_MET,
+                    "需 Lv" + minLevel + " 及以上会员才能候补，当前 Lv" + userLevel);
+            }
+        }
 
         // 1) 已购（已成功预约）则直接标记 SUCCESS，不进入队列
         boolean purchased = Boolean.TRUE.equals(

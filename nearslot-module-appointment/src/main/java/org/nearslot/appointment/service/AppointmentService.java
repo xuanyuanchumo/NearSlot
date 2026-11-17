@@ -36,6 +36,8 @@ public class AppointmentService {
     private final ReconcileService reconcileService;
     /** 等级校验走 common 接口，避免 appointment 直接依赖 auth 模块（C-ARCH-01）。 */
     private final org.nearslot.common.api.UserLevelQuery userLevelQuery;
+    /** 候补提升：取消/回补后触发（FR-3.2）。 */
+    private final PromotionService promotionService;
 
     /**
      * 分布式 ID：直接用 MyBatis-Plus 的 IdWorker（成熟库优先，ADR-016）。
@@ -153,5 +155,10 @@ public class AppointmentService {
             rb.success() ? "cancel rollback" : "cancel rollback failed code=" + rb.getCode());
         log.info("cancel ok userId={} orderId={} logType={} traceId={} rollbackSuccess={}",
             userId, orderId, LogType.RESTORE.getCode(), traceId, rb.success());
+
+        // FR-3.2 余量回流：取消后异步提升队首候补（不阻塞取消端点）
+        if (rb.success()) {
+            promotionService.promoteAsync(o.getSlotId());
+        }
     }
 }

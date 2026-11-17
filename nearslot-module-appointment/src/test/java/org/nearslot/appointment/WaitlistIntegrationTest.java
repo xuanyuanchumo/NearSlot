@@ -1,8 +1,11 @@
 package org.nearslot.appointment;
 
 import org.junit.jupiter.api.*;
+import org.nearslot.appointment.entity.TimeSlot;
+import org.nearslot.appointment.mapper.TimeSlotMapper;
 import org.nearslot.appointment.service.PromotionService;
 import org.nearslot.appointment.service.WaitlistService;
+import org.nearslot.common.api.UserLevelQuery;
 import org.nearslot.framework.cache.RedisConstants;
 import org.nearslot.framework.lock.DistributedLockTemplate;
 import org.redisson.Redisson;
@@ -46,8 +49,17 @@ class WaitlistIntegrationTest {
         if (!pwd.isBlank()) single.setPassword(pwd);
         redisson = Redisson.create(rc);
 
-        waitlist = new WaitlistService(redis);
-        promotion = new PromotionService(redis, new DistributedLockTemplate(redisson));
+        TimeSlotMapper slotMapper = org.mockito.Mockito.mock(TimeSlotMapper.class);
+        TimeSlot slot = new TimeSlot();
+        slot.setId(1L);
+        slot.setMinLevel(0);
+        org.mockito.Mockito.when(slotMapper.selectById(org.mockito.ArgumentMatchers.anyLong()))
+            .thenReturn(slot);
+
+        UserLevelQuery levelQuery = uid -> 10;   // 集成测试默认满级，聚焦队列语义
+
+        waitlist = new WaitlistService(redis, slotMapper, levelQuery);
+        promotion = new PromotionService(redis, new DistributedLockTemplate(redisson), slotMapper, levelQuery);
     }
 
     @AfterAll
