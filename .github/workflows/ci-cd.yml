@@ -91,6 +91,34 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: cd NearSlot && mvn -B compile && mvn -B test -DexcludedGroups=integration
+      # 覆盖率报告（JaCoCo 已在根 pom 启用 prepare-agent + report）
+      - name: 覆盖率汇总
+        run: |
+          cd NearSlot
+          python3 - <<'PY'
+          import csv, glob, os
+          tot=[0,0]; br=[0,0]; rows=[]
+          for f in glob.glob('*/target/site/jacoco/jacoco.csv'):
+              m=f.split(os.sep)[0]; lc=lm=bc=bm=0
+              with open(f, encoding='utf-8') as fh:
+                  for r in csv.DictReader(fh):
+                      lc+=int(r['LINE_COVERED']); lm+=int(r['LINE_MISSED'])
+                      bc+=int(r['BRANCH_COVERED']); bm+=int(r['BRANCH_MISSED'])
+              tot[0]+=lc; tot[1]+=lc+lm; br[0]+=bc; br[1]+=bc+bm
+              rows.append((m, lc, lc+lm))
+          for m, c, t in rows:
+              print(f"{m:30s} {0 if t==0 else round(100*c/t,1)}%")
+          line = 0 if tot[1]==0 else round(100*tot[0]/tot[1],1)
+          print(f"合计行覆盖 {line}% ({tot[0]}/{tot[1]})")
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
+              s.write(f"## 覆盖率\n\n行覆盖 **{line}%**（{tot[0]}/{tot[1]}）\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-reports
+          path: NearSlot/*/target/site/jacoco/
+          retention-days: 7
   integration:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
