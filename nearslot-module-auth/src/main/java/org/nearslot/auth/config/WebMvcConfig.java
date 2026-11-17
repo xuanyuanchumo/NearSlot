@@ -26,6 +26,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
                                 // 时段查询为公开只读：未登录用户需先浏览时段才能决定是否登录。
                                 // 仅 GET /slots 放行；POST 发布/关闭仍由方法级鉴权兜底（见 SlotController）
                                 "/api/v1/slots", "/api/v1/tech-rank/**",
+                                // 探活基准端点免鉴权（压测需要测框架层吞吐，不被登录拦截干扰）
+                                "/api/v1/system/**",
                                 "/api/v1/internal/**",
                                 "/api/v1/payments/callback", "/actuator/**");
     }
