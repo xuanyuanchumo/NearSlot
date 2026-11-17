@@ -8,7 +8,8 @@ spring:
       password: ${REDIS_PASSWORD:}
   datasource:
     # 与 dev 一致使用 MySQL（业务库统一 MySQL，H2 已彻底移除）
-    url: jdbc:mysql://localhost:43306/nearslot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    # 本地 MySQL 实例（D:/MySQL）；容器方案用 43306，见 docker-compose.infra.yml
+    url: jdbc:mysql://localhost:${MYSQL_PORT:3306}/nearslot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: ${MYSQL_USER:nearslot}
     password: ${MYSQL_PASSWORD:}
