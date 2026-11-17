@@ -106,8 +106,8 @@ public class AppointmentService {
         o.setShopId(slot.getShopId());
         o.setServiceStaffId(slot.getServiceStaffId());
         // ADR-021 双写 + ADR-022 履约方式默认
-        o.setServiceStaffId(slot.getServiceStaffId() != null
-            ? slot.getServiceStaffId() : slot.getServiceStaffId());
+        // ADR-021：直接取 serviceStaffId（此前双写遗留的恒真三元已被清理）
+        o.setServiceStaffId(slot.getServiceStaffId());
         if (o.getFulfillmentMode() == null) o.setFulfillmentMode("DOOR_TO_DOOR");
         o.setStatus(OrderStatus.PENDING.getCode());
         o.setAmountCent(0);
