@@ -38,6 +38,8 @@ public class CacheInvalidationConsumer {
 
     /** 每个实例启动时声明自己的匿名队列，并绑定 fanout。 */
     @Configuration
+    @ConditionalOnProperty(name = "nearslot.mq.invalidation-enabled",
+                           havingValue = "true", matchIfMissing = true)
     static class AnonymousQueueConfig {
         @Bean
         public Queue invalidationAnonymousQueue() {

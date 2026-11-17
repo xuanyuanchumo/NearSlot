@@ -13,6 +13,7 @@ public enum BaseCode {
     SUCCESS(200, "ok"),
     UNAUTHORIZED(40101, "未登录或会话失效"),
     TOKEN_SUPERSEDED(40102, "凭证已被顶替"),
+    BAD_REQUEST(40001, "参数错误"),
     FORBIDDEN(40301, "无权限"),
     NOT_FOUND(40401, "资源不存在"),
     RATE_LIMITED(42901, "触发限流"),

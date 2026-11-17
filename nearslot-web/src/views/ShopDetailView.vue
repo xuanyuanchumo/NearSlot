@@ -6,26 +6,49 @@
  * - 抢约前先判登录（未登录直接跳登录，不依赖 401 兜底）；
  * - 防重三元组：bookingInProgress 标志 + 按钮 loading + finally 复位；
  * - 抢约成功后不本地占位，重查时段以服务端状态为准；
- * - Hold 倒计时以服务端 expiresAt 为准，过期后按钮不可点。
+ * - Hold 倒计时以「下单时刻 + 后端 Hold 窗口」推算（后端只返回 orderId），
+ *   权威判定仍在服务端；过期后按钮不可点。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import PageState from "@/components/PageState.vue";
 import SlotGrid from "@/components/SlotGrid.vue";
-import { fetchShopDetail, fetchSlots } from "@/api/shop";
+import { fetchShopDetail, fetchSlots, type SlotView } from "@/api/shop";
 import { grabAppointment } from "@/api/appointment";
 import { isLoggedIn } from "@/utils/auth";
-import { formatCents, formatDateTimeInZone, formatCountdown, todayInZone } from "@/utils/format";
-import type { GrabResult, Shop, TimeSlot } from "@/types/api";
+import {
+  formatCents,
+  formatCountdown,
+  formatDateTimeInZone,
+  formatTimeInZone,
+  todayInZone,
+} from "@/utils/format";
+import type { Shop } from "@/types/api";
+
+/**
+ * 抢约成功后的本地 Hold 视图。
+ *
+ * 后端 POST /appointments 只返回 orderId（Long），不下发 expiresAt；
+ * 因此倒计时以「本地下单时刻 + 后端 Hold 窗口（10 分钟）」推算，
+ * 真正的权威判定仍在服务端（过期后 Lua 会拒绝支付）。这里明确标注为估算值，
+ * 而不是假装拿到了服务端时间戳。
+ */
+interface HoldView {
+  orderId: string;
+  expiresAt: string;
+}
+
+/** 与后端 SlotBookingCore.HOLD_MINUTES = 10 对齐（docs/architecture/overview.md §Hold）。 */
+const HOLD_WINDOW_MS = 10 * 60 * 1000;
 
 const route = useRoute();
 const router = useRouter();
 
 const shopId = computed(() => String(route.params.id ?? ""));
 const shop = ref<Shop | null>(null);
-const slots = ref<TimeSlot[]>([]);
-const selectedSlot = ref<TimeSlot | null>(null);
+const slots = ref<SlotView[]>([]);
+const selectedSlot = ref<SlotView | null>(null);
 
 const loadingShop = ref(false);
 const loadingSlots = ref(false);
@@ -33,7 +56,7 @@ const bookingInProgress = ref(false);
 const errorMessage = ref("");
 const slotErrorMessage = ref("");
 const activeDate = ref("");
-const hold = ref<GrabResult | null>(null);
+const hold = ref<HoldView | null>(null);
 const remainingMs = ref(0);
 
 let countdownTimer: number | undefined;
@@ -52,7 +75,8 @@ const slotsState = computed(() => {
   return "ready" as const;
 });
 
-const tzId = computed(() => slots.value[0]?.tzId ?? "Asia/Shanghai");
+// 后端时段投影不含 tzId；平台统一按 Asia/Shanghai 解释墙钟时间（schema.md §2）。
+const tzId = "Asia/Shanghai";
 const holdExpired = computed(() => hold.value !== null && remainingMs.value <= 0);
 
 async function loadShop(): Promise<void> {
@@ -97,7 +121,7 @@ function handleDateChange(value: string | number | Date | null | undefined): voi
 }
 
 /** 选中时段；已选则取消 */
-function handleSelect(slot: TimeSlot): void {
+function handleSelect(slot: SlotView): void {
   selectedSlot.value = slot;
 }
 
@@ -106,9 +130,9 @@ function handleUnselect(): void {
 }
 
 /** 倒计时：以服务端 expiresAt 为准，仅做展示，不做任何清理动作 */
-function startHoldCountdown(result: GrabResult): void {
-  hold.value = result;
-  const expiresAt = new Date(result.expiresAt).getTime();
+function startHoldCountdown(orderId: string): void {
+  hold.value = { orderId, expiresAt: new Date(Date.now() + HOLD_WINDOW_MS).toISOString() };
+  const expiresAt = new Date(hold.value?.expiresAt ?? Date.now()).getTime();
   const tick = (): void => {
     remainingMs.value = Math.max(0, expiresAt - Date.now());
     if (remainingMs.value <= 0 && countdownTimer !== undefined) {
@@ -143,13 +167,11 @@ async function handleGrab(): Promise<void> {
 
   bookingInProgress.value = true;
   try {
-    const result = await grabAppointment({
-      slotId: slot.id,
-      // 幂等键：同一时段 + 用户，重复提交由后端 42902 拦截
-      idempotencyKey: `grab-${slot.id}-${Date.now()}`,
-    });
+    // 幂等由后端 @Idempotent("#userId + ':' + #slotId", ttl=10s) 保证，
+    // 前端重复提交会拿到 42902，无需自己拼幂等键。
+    const orderId = await grabAppointment({ slotId: slot.id });
     ElMessage.success("抢约成功，已为您锁定时段");
-    startHoldCountdown(result);
+    startHoldCountdown(orderId);
     // 服务端状态回查优于本地乐观更新
     await loadSlots(activeDate.value);
   } catch {
@@ -273,7 +295,10 @@ onBeforeUnmount(() => {
         <div class="ns-booking-summary">
           <template v-if="selectedSlot">
             <strong>{{ formatDateTimeInZone(selectedSlot.startsAt, tzId) }}</strong>
-            <span class="ns-text-muted">共 {{ selectedSlot.durationMinutes }} 分钟</span>
+            <span class="ns-text-muted">
+              {{ formatTimeInZone(selectedSlot.startsAt, tzId) }} –
+              {{ formatTimeInZone(selectedSlot.endsAt, tzId) }}（余 {{ selectedSlot.remaining }}）
+            </span>
           </template>
           <span v-else class="ns-text-muted">请选择一个时段</span>
         </div>

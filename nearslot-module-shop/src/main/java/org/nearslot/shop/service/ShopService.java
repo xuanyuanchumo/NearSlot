@@ -49,13 +49,30 @@ public class ShopService {
         return s;
     }
 
-    /** 按 ID 查（三防）。 */
+    /**
+     * 按 ID 查（三防）。
+     *
+     * **2026-11-17 审计修复（Major）**：布隆过滤器是**进程内** Guava 结构，
+     * 多实例部署时 A 实例新建的 shop 只写进 A 的过滤器，
+     * B 实例 mightContain=false 就抛 404——用户在不同实例间"店铺时有时无"，
+     * 只能等重启全量预热才恢复。
+     *
+     * 修正原则：布隆过滤器只用于**挡住必然不存在**的请求以省一次 DB 查询，
+     * 它绝不能成为业务正确性的判定依据。这里改为「布隆未命中仍然回源 DB」，
+     * 命中则走缓存；DB 也没有时才返回 404（并把空值缓存交给 CacheManager 的 TTL_NULL）。
+     * 代价是穿透时多一次 DB 查询——与"误杀真实数据"相比，这个代价可以接受。
+     */
     public Shop queryById(Long id) {
-        if (!bloomFilter.mightContain("shop", String.valueOf(id))) {
-            throw new BaseException(BaseCode.NOT_FOUND, "服务商不存在（布隆拦截）");
-        }
-        return cacheManager.get(RedisConstants.CACHE_SHOP + id, Shop.class,
+        Shop cached = cacheManager.get(RedisConstants.CACHE_SHOP + id, Shop.class,
             k -> shopMapper.selectById(id), 30 * 60);
+        if (cached == null) {
+            throw new BaseException(BaseCode.NOT_FOUND, "服务商不存在");
+        }
+        // 命中真实数据后顺手补写布隆（增量自愈，减少后续穿透概率）
+        if (!bloomFilter.mightContain("shop", String.valueOf(id))) {
+            bloomFilter.put("shop", String.valueOf(id));
+        }
+        return cached;
     }
 
     /** 服务商分页列表（前端首页）。 */

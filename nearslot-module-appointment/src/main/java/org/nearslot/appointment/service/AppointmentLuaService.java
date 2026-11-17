@@ -42,9 +42,14 @@ public class AppointmentLuaService {
         return s;
     }
 
-    /** 抢约：余量 + 一人一时段 + 技师时间轴三检查，原子完成。 */
+    /**
+     * 抢约：时间闸 + 余量 + 一人一时段 + 技师时间轴，原子完成。
+     *
+     * @param capacity 时段容量，用于余量键缺失时的兜底重建（Redis 过期/重启后
+     *                 不应让整个时段永久不可约——原实现直接返回 10004）
+     */
     public BookResult book(long userId, long slotId, long techId,
-                           long startTs, long endTs, long orderId, long traceId) {
+                           long startTs, long endTs, long orderId, long traceId, int capacity) {
         String raw = redis.execute(BOOK_SCRIPT,
             List.of(RedisConstants.SLOT_STOCK + slotId,
                     RedisConstants.SLOT_USER + slotId,
@@ -53,13 +58,20 @@ public class AppointmentLuaService {
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(endTs),
             String.valueOf(orderId), String.valueOf(traceId),
-            "86400", "1");
+            "86400", String.valueOf(Math.max(capacity, 1)),
+            // nowTs 由服务端时钟给出，避免 Java 与 Lua 两处时间口径分裂
+            String.valueOf(System.currentTimeMillis()));
         return parse(raw);
     }
 
-    /** 回补（ADR-005 反转语义）。 */
+    /**
+     * 回补（ADR-005 反转语义）。
+     *
+     * @param capacity 时段容量，用于余量键缺失时重建与 INCR 后封顶（防超卖）
+     */
     public BookResult rollback(long userId, long slotId, long techId,
-                               long startTs, long endTs, long orderId, long traceId, int operate) {
+                               long startTs, long endTs, long orderId, long traceId,
+                               int operate, int capacity) {
         String raw = redis.execute(ROLLBACK_SCRIPT,
             List.of(RedisConstants.SLOT_STOCK + slotId,
                     RedisConstants.SLOT_USER + slotId,
@@ -67,7 +79,8 @@ public class AppointmentLuaService {
                     RedisConstants.PREFIX + "staff:timeline:" + techId),
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(orderId), String.valueOf(traceId),
-            String.valueOf(operate), "86400", String.valueOf(endTs));
+            String.valueOf(operate), "86400", String.valueOf(endTs),
+            String.valueOf(Math.max(capacity, 1)));
         return parse(raw);
     }
 

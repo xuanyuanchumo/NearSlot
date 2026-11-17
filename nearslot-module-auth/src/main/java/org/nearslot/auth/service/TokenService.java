@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -161,28 +162,39 @@ public class TokenService {
      * @return 新 AT；若并发被顶替则返回当前最新 AT
      */
     public String refresh(Long userId, String oldRefreshToken) {
+        // ============================================================
+        // 安全红线（2026-11-17 审计修复，Blocker）：
+        // 此前「RT 不匹配即回吐当前最新 AT」的分支可被**任意人**利用——
+        // 只要拼出 "userId:随便写点什么" 的 Refresh-Token 头，
+        // 就能拿到该用户的有效 AT（实测已复现账号接管，含 PLATFORM 角色）。
+        //
+        // 正确语义（对齐 refreshExpiredToken.lua 的三态）：
+        //   ① RT 键不存在            -> 401 会话已失效
+        //   ② RT 不匹配 且 已有新 AT -> 只有**持有该最新 AT** 的并发请求才自愈；
+        //      而这里拿不到 AT，故一律 401。并发自愈改由前端"单飞刷新"承担
+        //      （request.ts 已有 refreshPromise 单飞，重复自愈本就不必要）。
+        //   ③ RT 匹配                -> 正常换发
+        // 另：RT 必须与 Redis 中绑定值**逐字节相等**，杜绝前缀伪造。
+        // ============================================================
         String rtKey = RedisConstants.TOKEN_REFRESH + userId;
         String currentRt = redis.opsForValue().get(rtKey);
 
-        // RT 不存在：会话已失效，必须重新登录
+        // ① RT 不存在：会话已失效，必须重新登录
         if (currentRt == null) {
             throw new BaseException(BaseCode.UNAUTHORIZED, "会话已失效，请重新登录");
         }
 
-        String atKey = RedisConstants.TOKEN_ACCESS + userId;
-        String curKey = RedisConstants.TOKEN_VERSION_CURRENT + userId;
-
-        // RT 不匹配：说明已被其他并发请求刷新过 → 422 自愈，返回最新 AT
-        if (!currentRt.equals(oldRefreshToken)) {
-            String latestAt = redis.opsForValue().get(curKey);
-            if (latestAt != null) {
-                // 自愈：把最新 AT 还给调用方，不打断用户体验
-                return latestAt;
-            }
-            throw new BaseException(BaseCode.UNAUTHORIZED, "凭证已失效，请重新登录");
+        // ② RT 不匹配：不是合法会话，绝不回吐 AT（安全优先于并发自愈）
+        if (!MessageDigest.isEqual(
+                currentRt.getBytes(StandardCharsets.UTF_8),
+                oldRefreshToken.getBytes(StandardCharsets.UTF_8))) {
+            log.warn("Refresh-Token 不匹配，拒绝换发 userId={}", userId);
+            throw new BaseException(BaseCode.UNAUTHORIZED, "凭证与当前会话不匹配，请重新登录");
         }
 
-        // 正常刷新：刷新**不 bump version**（ADR-002 取舍，减少写冲突）
+        // ③ 正常刷新：刷新**不 bump version**（ADR-002 取舍，减少写冲突）
+        String atKey = RedisConstants.TOKEN_ACCESS + userId;
+        String curKey = RedisConstants.TOKEN_VERSION_CURRENT + userId;
         String version = redis.opsForValue().get(RedisConstants.TOKEN_VERSION_VALID + userId);
         long v = version == null ? 1L : Long.parseLong(version);
         String newAt = buildAccessToken(userId, v);

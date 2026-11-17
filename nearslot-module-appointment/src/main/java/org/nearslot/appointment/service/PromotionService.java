@@ -3,26 +3,36 @@ package org.nearslot.appointment.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.nearslot.appointment.entity.TimeSlot;
+import org.nearslot.appointment.event.SlotOpenedEvent;
 import org.nearslot.appointment.mapper.TimeSlotMapper;
 import org.nearslot.common.api.UserLevelQuery;
+import org.nearslot.common.enums.BaseCode;
+import org.nearslot.common.exception.BaseException;
 import org.nearslot.framework.cache.RedisConstants;
 import org.nearslot.framework.lock.DistributedLockTemplate;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 候补提升（FR-3.2）。
  *
  * 三个关键设计：
- * 1. **异步**：取消端点只触发、不等待（research/08 §6：取消不能变慢）。
+ * 1. **异步**：监听 {@link SlotOpenedEvent}，在独立线程执行，取消端点只做标记+发事件
+ *    （research/08 §5：同步提升让取消变慢，且失败重试耦合在关键路径）。
  * 2. **exactly-once**：分布式锁抢占 + 出队即删，多实例消费只提升一次。
  * 3. **等级重校验**（research/09b §1 纠错点）：候选可能是在等级变更前入队的，
- *    提升时必须**重跑**等级校验；不满足则跳过该候选、继续下一位，
- *    否则会把不合规用户塞进预约，造成"预约成功但实际无资格"。
+ *    提升时必须**重跑**等级校验；不满足则跳过该候选、继续下一位。
+ *
+ * **2026-11-17 审计修复（Blocker）**：
+ * 此前提升只改 Redis 三键、把用户标成 SUCCESS，**既不创建订单也不扣库存**——
+ * 用户在「我的预约」里看不到任何东西，余量也没被真正占用（下一个抢约者照样成功），
+ * 等于候补功能完全没有闭环。
+ * 现改为：提升 = 走与抢约完全相同的内核 {@link SlotBookingCore#book}。
  */
 @Slf4j
 @Service
@@ -37,29 +47,25 @@ public class PromotionService {
     private final DistributedLockTemplate lockTemplate;
     private final TimeSlotMapper timeSlotMapper;
     private final UserLevelQuery userLevelQuery;
+    private final SlotBookingCore bookingCore;
 
-    /** 提升线程池：少量线程即可（提升不是高频操作，且需串行化保护）。 */
-    private final ExecutorService executor = Executors.newFixedThreadPool(2, new ThreadFactory() {
-        private final AtomicInteger seq = new AtomicInteger();
-        @Override public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "promotion-" + seq.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        }
-    });
-
-    /** 异步触发提升（取消/回补后调用，不阻塞调用方）。 */
-    public void promoteAsync(long slotId) {
-        executor.submit(() -> {
-            try {
-                Long promoted = promoteNext(slotId);
-                if (promoted != null) {
-                    log.info("余量回流：候补已提升 slotId={} userId={}", slotId, promoted);
-                }
-            } catch (RuntimeException e) {
-                log.error("候补提升失败 slotId={}", slotId, e);
+    /**
+     * 监听余量回流事件并异步提升候补。
+     *
+     * 用 @EventListener 而非直接调用：取消/超时回收与提升之间不该有编译期依赖，
+     * 否则会形成 HoldTimeoutTask ↔ PromotionService ↔ SlotBookingCore 的循环（已实测启动失败）。
+     */
+    @Async("promotionExecutor")
+    @EventListener
+    public void onSlotOpened(SlotOpenedEvent event) {
+        try {
+            Long promoted = promoteNext(event.slotId());
+            if (promoted != null) {
+                log.info("余量回流：候补已提升 slotId={} userId={}", event.slotId(), promoted);
             }
-        });
+        } catch (RuntimeException e) {
+            log.error("候补提升失败 slotId={}", event.slotId(), e);
+        }
     }
 
     /**
@@ -85,30 +91,40 @@ public class PromotionService {
             Set<String> head = redis.opsForZSet().range(zsetKey, 0, 0);
             if (head == null || head.isEmpty()) return null;
             String userId = head.iterator().next();
+            long uid = Long.parseLong(userId);
 
             // 等级重校验：不满足则跳过该候选（出队但不提升）
-            if (minLevel > 0) {
-                int lv = userLevelQuery.levelOf(Long.valueOf(userId));
-                if (lv < minLevel) {
-                    redis.opsForZSet().remove(zsetKey, userId);
-                    redis.opsForSet().remove(setKey, userId);
-                    redis.opsForHash().delete(statusKey, userId);
-                    log.info("候补候选等级不足，已跳过 slotId={} userId={} lv={} 需={}",
-                        slotId, userId, lv, minLevel);
-                    continue;
-                }
+            if (minLevel > 0 && userLevelQuery.levelOf(uid) < minLevel) {
+                dropCandidate(zsetKey, setKey, statusKey, userId);
+                log.info("候补候选等级不足，已跳过 slotId={} userId={} 需 Lv{}", slotId, userId, minLevel);
+                continue;
             }
 
-            // 出队 + 置 SUCCESS
-            redis.opsForZSet().remove(zsetKey, userId);
-            redis.opsForSet().remove(setKey, userId);
-            redis.opsForHash().put(statusKey, userId, String.valueOf(WaitlistService.STATUS_SUCCESS));
-            redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
-
-            log.info("候补提升成功 slotId={} userId={}", slotId, userId);
-            return Long.valueOf(userId);
+            // 真正的提升：走与抢约完全相同的预扣 + 落单内核
+            try {
+                Long orderId = bookingCore.book(uid, slotId);
+                redis.opsForZSet().remove(zsetKey, userId);
+                redis.opsForSet().remove(setKey, userId);
+                redis.opsForHash().put(statusKey, userId, String.valueOf(WaitlistService.STATUS_SUCCESS));
+                redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+                log.info("候补提升成功并已建单 slotId={} userId={} orderId={}", slotId, userId, orderId);
+                return uid;
+            } catch (BaseException e) {
+                // 余量已被抢走 / 时段关闭 / 一人一时段：该候选本轮无望，出队后继续下一位。
+                // 这是**正常业务分支**（候补本来就要竞争余量），不是故障。
+                dropCandidate(zsetKey, setKey, statusKey, userId);
+                log.info("候补候选预扣失败，已跳过 slotId={} userId={} code={}",
+                    slotId, userId, e.getCode().getCode());
+            }
         }
         log.warn("候补提升达到最大跳过次数 {}，仍有不合格候选 slotId={}", MAX_SKIP, slotId);
         return null;
+    }
+
+    /** 出队并清理三键（被跳过的候选）。 */
+    private void dropCandidate(String zsetKey, String setKey, String statusKey, String userId) {
+        redis.opsForZSet().remove(zsetKey, userId);
+        redis.opsForSet().remove(setKey, userId);
+        redis.opsForHash().delete(statusKey, userId);
     }
 }

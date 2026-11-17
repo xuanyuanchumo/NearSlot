@@ -39,12 +39,38 @@ function statusText(status: AppointmentStatus): string {
   return APPOINTMENT_STATUS_TEXT[status] ?? status;
 }
 
+/**
+ * 后端 OrderStatus → 前端 AppointmentStatus 字典。
+ *
+ * 契约分裂的收敛点（2026-11-17 审计）：后端用**数字**枚举码
+ * （1 PENDING / 2 CONFIRMED / 3 CANCELLED / 4 DONE / 5 REFUNDED），
+ * 前端 types/api.ts 用字符串字面量。二者必须显式映射，
+ * 否则状态标签恒显示原始数字、取消按钮的 canCancel 判断恒为 false。
+ */
+const ORDER_STATUS_MAP: Record<number, AppointmentStatus> = {
+  1: "PENDING",
+  2: "CONFIRMED",
+  3: "CANCELLED",
+  4: "COMPLETED",
+  5: "CANCELLED", // 已退款：对用户而言等同已取消
+};
+
+function normalizeAppointment(row: Appointment & { status: number | AppointmentStatus }): Appointment {
+  const raw = row.status;
+  const status: AppointmentStatus =
+    typeof raw === "number" ? (ORDER_STATUS_MAP[raw] ?? "PENDING") : raw;
+  return { ...row, status };
+}
+
 async function loadAppointments(): Promise<void> {
   loading.value = true;
   errorMessage.value = "";
   try {
-    const page = await fetchAppointments({ limit: 20 });
-    appointments.value = page.items;
+    // 后端 GET /appointments 返回裸数组（不是 PageResult），
+    // 且 status 是**数字**（OrderStatus code：1待支付 2已确认 3已取消 4已完成 5已退款）。
+    // 2026-11-17 审计修复：此前按 page.items 取值，列表恒空。
+    const rows = await fetchAppointments();
+    appointments.value = rows.map(normalizeAppointment);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "加载预约列表失败";
   } finally {

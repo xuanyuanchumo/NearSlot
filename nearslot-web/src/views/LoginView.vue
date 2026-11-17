@@ -14,14 +14,16 @@ const formRef = ref<FormInstance>();
 const loading = ref(false);
 
 const form = reactive({
-  username: "",
+  // 后端 LoginRequest 的字段是 phone（@NotBlank），不是 username。
+  // 2026-11-17 审计修复：此前传 username，后端参数校验直接 400。
+  phone: "",
   password: "",
 });
 
 const rules: FormRules<typeof form> = {
-  username: [
-    { required: true, message: "请输入用户名", trigger: "blur" },
-    { min: 3, max: 32, message: "用户名长度为 3-32 个字符", trigger: "blur" },
+  phone: [
+    { required: true, message: "请输入手机号", trigger: "blur" },
+    { pattern: /^1\d{10}$/, message: "请输入 11 位手机号", trigger: "blur" },
   ],
   password: [
     { required: true, message: "请输入密码", trigger: "blur" },
@@ -36,7 +38,7 @@ async function handleSubmit(): Promise<void> {
 
   loading.value = true;
   try {
-    const result = await loginApi({ username: form.username, password: form.password });
+    const result = await loginApi({ phone: form.phone, password: form.password, type: "password" });
     userStore.login({
       accessToken: result.accessToken,
       userId: result.userId,
@@ -69,11 +71,11 @@ async function handleSubmit(): Promise<void> {
         size="large"
         @submit.prevent="handleSubmit"
       >
-        <el-form-item label="用户名" prop="username">
+        <el-form-item label="手机号" prop="phone">
           <el-input
-            v-model="form.username"
-            placeholder="请输入用户名"
-            autocomplete="username"
+            v-model="form.phone"
+            placeholder="请输入手机号"
+            autocomplete="tel"
             clearable
             :prefix-icon="'User'"
           />

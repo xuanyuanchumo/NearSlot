@@ -131,6 +131,20 @@ public class SlotPublishService {
         return out;
     }
 
+    /**
+     * 取时段归属店铺（鉴权用）。
+     *
+     * 为什么单独暴露：关闭时段的请求体里没有 shopId，
+     * 控制器无法自行判断归属，必须先把 slotId 翻译成 shopId 再做闸。
+     *
+     * @throws org.nearslot.common.exception.BaseException 时段不存在时 404
+     */
+    public Long shopIdOfSlot(Long slotId) {
+        TimeSlot slot = timeSlotMapper.selectById(slotId);
+        if (slot == null) throw new BaseException(BaseCode.NOT_FOUND, "时段不存在 id=" + slotId);
+        return slot.getShopId();
+    }
+
     /** 关闭时段：状态置 2 + 删余量键 + 广播。 */
     @Transactional(rollbackFor = Exception.class)
     public void close(Long slotId) {

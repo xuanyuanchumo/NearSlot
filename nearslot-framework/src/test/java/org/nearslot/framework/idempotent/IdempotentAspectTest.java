@@ -112,9 +112,16 @@ class IdempotentAspectTest {
         verify(bucket).delete();
     }
 
+    /**
+     * 非业务异常（如 DB 挂掉）也必须释放幂等键。
+     *
+     * 语义修正确认（2026-11-17 审计，Major）：旧实现只在 BaseException 时删键，
+     * 任何运行时异常都会让键占满 TTL——用户重试被 42902「重复提交」拒绝，
+     * 把一次系统故障放大成用户不可用的功能。正确语义是「只有成功才保留键」。
+     */
     @Test
-    @DisplayName("非业务异常 -> 不删除幂等键、异常照常透传（占位语义不被普通故障打破）")
-    void nonBusinessExceptionKeepsKey() throws Throwable {
+    @DisplayName("非业务异常 -> 同样删除幂等键，允许用户重试")
+    void nonBusinessExceptionReleasesKey() throws Throwable {
         ProceedingJoinPoint pjp = pjp("byOrderId", new String[]{"orderId"}, new Object[]{"A1"});
         when(bucket.trySet(any(), anyLong(), any())).thenReturn(true);
         RuntimeException boom = new IllegalStateException("DB 挂了");
@@ -124,6 +131,19 @@ class IdempotentAspectTest {
         Throwable thrown = assertThrows(IllegalStateException.class, () -> aspect.around(pjp));
 
         assertSame(boom, thrown);
+        verify(bucket).delete();
+    }
+
+    @Test
+    @DisplayName("成功调用 -> 保留幂等键，后续重复提交被 42902 拦截")
+    void successKeepsKey() throws Throwable {
+        ProceedingJoinPoint pjp = pjp("byOrderId", new String[]{"orderId"}, new Object[]{"A1"});
+        when(bucket.trySet(any(), anyLong(), any())).thenReturn(true);
+        when(pjp.proceed()).thenReturn("ok");
+        clearInvocations(bucket);
+
+        assertEquals("ok", aspect.around(pjp));
+
         verify(bucket, never()).delete();
     }
 

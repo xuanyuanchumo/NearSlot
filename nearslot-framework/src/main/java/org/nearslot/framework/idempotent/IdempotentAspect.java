@@ -44,11 +44,24 @@ public class IdempotentAspect {
 
         boolean first = redisson.getBucket(key).trySet("1", anno.ttl(), TimeUnit.SECONDS);
         if (!first) throw new BaseException(BaseCode.IDEMPOTENT_HIT);
+        boolean success = false;
         try {
-            return pjp.proceed();
-        } catch (BaseException e) {
-            redisson.getBucket(key).delete();
-            throw e;
+            Object result = pjp.proceed();
+            success = true;
+            return result;
+        } finally {
+            // ============================================================
+            // 缺陷修复（2026-11-17 审计，Major）：
+            // 此前只在 catch (BaseException) 时删除幂等标记，
+            // 任何 RuntimeException / DB 异常 / Error 都会让幂等键占满整个 TTL，
+            // 用户重试被 42902「重复提交」拒绝——把一次系统故障放大成用户不可用。
+            //
+            // 正确语义：只有**成功**才保留标记（成功后的重复提交才该被拦截）；
+            // 失败必须释放，允许用户重试。
+            // ============================================================
+            if (!success) {
+                redisson.getBucket(key).delete();
+            }
         }
     }
 }

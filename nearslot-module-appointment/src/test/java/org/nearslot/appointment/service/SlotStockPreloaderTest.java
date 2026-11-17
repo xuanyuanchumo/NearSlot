@@ -61,18 +61,27 @@ class SlotStockPreloaderTest {
         verify(valueOps).set(eq(RedisConstants.SLOT_STOCK + 3002L), eq("1"));
     }
 
+    /**
+     * 启动预热必须用 SETNX（只补缺失键）。
+     *
+     * 2026-11-17 审计修复（Blocker）：原实现无条件 SET capacity，
+     * 每次重启都把已售出的余量重置回满值 —— 直接超卖。
+     */
     @Test
-    @DisplayName("启动预热：只处理 status=1 的时段")
-    void warmUpOnlyActiveSlots() throws Exception {
+    @DisplayName("启动预热：只处理 status=1 的时段，且必须用 SETNX（不得覆盖在售余量）")
+    void warmUpOnlyActiveSlotsUsesSetIfAbsent() throws Exception {
         when(slotMapper.selectList(isNull())).thenReturn(List.of(
             slot(1L, 2, 1), slot(2L, 3, 2), slot(3L, 4, 1)));
+        when(valueOps.setIfAbsent(anyString(), anyString())).thenReturn(true);
 
         ApplicationRunner runner = preloader.slotStockWarmUp();
         runner.run(null);
 
-        verify(valueOps).set(eq(RedisConstants.SLOT_STOCK + 1L), eq("2"));
-        verify(valueOps).set(eq(RedisConstants.SLOT_STOCK + 3L), eq("4"));
-        verify(valueOps, never()).set(eq(RedisConstants.SLOT_STOCK + 2L), anyString());
+        verify(valueOps).setIfAbsent(eq(RedisConstants.SLOT_STOCK + 1L), eq("2"));
+        verify(valueOps).setIfAbsent(eq(RedisConstants.SLOT_STOCK + 3L), eq("4"));
+        verify(valueOps, never()).setIfAbsent(eq(RedisConstants.SLOT_STOCK + 2L), anyString());
+        // 关键：启动预热绝不能用无条件 set（否则重启即超卖）
+        verify(valueOps, never()).set(anyString(), anyString());
     }
 
     @Test

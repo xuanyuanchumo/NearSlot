@@ -2,7 +2,10 @@ package org.nearslot.appointment;
 
 import org.junit.jupiter.api.*;
 import org.nearslot.appointment.entity.TimeSlot;
+import org.nearslot.appointment.mapper.AppointmentOrderMapper;
 import org.nearslot.appointment.mapper.TimeSlotMapper;
+import org.nearslot.appointment.service.HoldTimeoutTask;
+import org.nearslot.appointment.service.SlotBookingCore;
 import org.nearslot.appointment.service.PromotionService;
 import org.nearslot.appointment.service.WaitlistService;
 import org.nearslot.common.api.UserLevelQuery;
@@ -59,7 +62,13 @@ class WaitlistIntegrationTest {
         UserLevelQuery levelQuery = uid -> 10;   // 集成测试默认满级，聚焦队列语义
 
         waitlist = new WaitlistService(redis, slotMapper, levelQuery);
-        promotion = new PromotionService(redis, new DistributedLockTemplate(redisson), slotMapper, levelQuery);
+        // 提升会被真实调用（不再只改 Redis）：给出可工作的插桩，避免集成测试因缺 Bean 失败
+        SlotBookingCore bookingCore = org.mockito.Mockito.mock(SlotBookingCore.class);
+        org.mockito.Mockito.when(bookingCore.book(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong()))
+            .thenAnswer(inv -> 9_000_000L + System.nanoTime() % 100_000L);
+        promotion = new PromotionService(redis, new DistributedLockTemplate(redisson), slotMapper,
+            levelQuery, bookingCore);
     }
 
     @AfterAll
