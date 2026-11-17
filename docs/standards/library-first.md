@@ -75,6 +75,7 @@ updated: 2026-11-17
 | 前端代理 502 | Vite 代理指向 8081，后端跑在 48081 | 端口必须三处统一：dev/verify profile、vite proxy、nginx upstream |
 | 布隆过滤器未预热 | 初始化即空集合，所有查询 mightContain=false，**全部详情 404** | 启动必须把已有数据 put 进去；布隆只答"一定不存在"，空集合=全否定 |
 | CacheManager 只支持基础类型 | 缓存实体抛 "unsupported type: class ...Shop" | 实体缓存必须 JSON 序列化；`String.valueOf(entity)` 得到的是 `Shop@hash` 脏数据 |
+| 用 H2 做验证库 | 验证环境与生产不同构：`user` 是 H2 保留字需 `NON_KEYWORDS=USER` 特判，MySQL 无此问题；DDL 方言差异掩盖真实缺陷 | **业务库统一 MySQL**；H2 已于 2026-11-17 彻底移除 |
 | 旧格式缓存残留 | 改序列化方式后仍 500（读到旧 toString 数据） | 序列化格式变更须 flush 缓存或加版本前缀 |
 | 时段查询需登录 | 前端浏览阶段未登录即 401 | 只读查询应放行（GET），写操作才鉴权 |
 | 密码长度校验与种子数据不一致 | 改密后无法恢复原密码（`pass123` 仅 7 位，新规则要求 ≥8） | 校验规则变更时须同步更新种子数据与文档示例 |

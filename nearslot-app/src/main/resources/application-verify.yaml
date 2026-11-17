@@ -7,15 +7,14 @@ spring:
       port: 46379
       password: ${REDIS_PASSWORD:}
   datasource:
-    # NON_KEYWORDS=USER：user 是 H2 保留字，需显式放行（生产 MySQL 无此问题）
-    url: jdbc:h2:mem:nearslot;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: ""
-  sql:
-    init:
-      mode: always
-      schema-locations: classpath:verify-schema.sql
+    # 与 dev 一致使用 MySQL（业务库统一 MySQL，H2 已彻底移除）
+    url: jdbc:mysql://localhost:43306/nearslot?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${MYSQL_USER:nearslot}
+    password: ${MYSQL_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
   rabbitmq:
     host: localhost
     port: 45672
@@ -30,8 +29,6 @@ server:
   # 与 dev profile、vite 代理、nginx upstream 统一为 8081
   port: 8081
 
-# 本地验证默认不起 RabbitMQ：关闭失效广播消费者，改用本地降级 + TTL
-# （实测：MQ 缺失时 @RabbitListener 每 5s 重连刷 ERROR 日志）
 nearslot:
   mq:
     # 本地已起 RabbitMQ 时开启，用于验证真实广播链路

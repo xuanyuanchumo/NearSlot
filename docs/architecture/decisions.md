@@ -112,6 +112,18 @@ updated: 2026-11-16
 - 理由：Vite+ 将运行时、包管理器与前端工具链收敛到一个入口，减少多套配置文件与版本对齐成本；vp check 一次调用即完成格式化、lint 与类型检查，直接对接 CI 的"单一命令门禁"；底层 rolldown/oxc 构建速度优于 Rollup 链。
 - 迁移方式：官方 vp migrate 自动把 vite 依赖改为 @voidzero-dev/vite-plus-core 并改写 vite.config.ts 的 defineConfig 来源；pnpm 侧通过 pnpm-workspace.yaml 的 catalog + overrides 锁定。
 - 代价：Vite+ 生态较新（1.x），部分插件兼容需实测；团队需熟悉 vp 子命令；vp test 与 vp run test（即 vpr）语义不同，已在 standards/frontend.md 与 package.json scripts 固化。
+## ADR-019 业务数据库统一 MySQL，彻底移除 H2
+
+- 决策：dev / verify / staging / prod **全部使用 MySQL 8.0** 作为业务库。H2 依赖与配置已于 2026-11-17 全部移除（`nearslot-app/pom.xml` 的 h2 runtime 依赖、`application-verify.yaml` 的 H2 数据源、`verify-schema.sql`）。
+- 理由：
+  1. **环境同构**：早期 verify profile 用 H2 内存库，导致验证环境与生产不同构。实证问题——`user` 是 H2 保留字，需在 JDBC URL 加 `NON_KEYWORDS=USER` 特判，而 MySQL 无此限制；这类"方言补丁"根本不代表生产行为。
+  2. **掩盖真实缺陷**：H2 的 DDL 方言、索引与唯一约束行为、字符集排序均与 MySQL 有差异，"在 H2 上通过"不能推导出"在 MySQL 上通过"。
+  3. **成本可控**：MySQL 已由 docker-compose.infra.yml 提供，启动成本与 H2 相当；Testcontainers 亦支持 MySQL。
+- 代价：
+  1. 单元测试不能再依赖 H2 内存库自动建表——涉及 SQL 语义的测试必须连真实 MySQL（Testcontainers 或本地容器）；
+  2. 纯逻辑单测需用 Mock（已在 `ReconciliationTaskTest`、`PaymentServiceTest` 中采用此模式）；
+  3. CI 需提供 MySQL service 或 Testcontainers。
+- 备选方案（未采纳）：PostgreSQL——需另立 ADR 并评估 ShardingSphere 5.3.2 兼容性与团队熟悉度，当前不切换。
 
 ## ADR-018 接口文档采用 Knife4j Next（com.baizhukui）作为 SSOT
 

@@ -8,6 +8,15 @@ updated: 2026-09-05
 
 # 数据库设计规范
 
+## 0. 数据库选型（强制）
+
+- **业务库统一 MySQL 8.0**（dev / verify / staging / prod 一致）。
+- **禁止使用 H2 或其他内存库承载业务数据**：早期用 H2 做 verify profile，
+  导致验证环境与生产不同构（`user` 为 H2 保留字需 `NON_KEYWORDS=USER` 特判，
+  MySQL 无此问题；DDL 方言、索引行为也有差异），已于 2026-11-17 彻底移除。
+- 单元测试可用 Mock，**涉及 SQL 语义的集成测试必须连真实 MySQL**（Testcontainers 或本地容器）。
+- 备选：PostgreSQL 需另立 ADR 并评估 ShardingSphere 兼容性；当前不做。
+
 ## 1. 建表规范
 
 - 主键：BIGINT 雪花 ID（应用侧生成，ADR-007），禁止自增；分片键必须包含在主键语义中。
