@@ -2,6 +2,24 @@
 target/
 *.class
 *.jar
+# Maven 本地仓库若被误解析到项目根目录，这些也必须忽略（曾导致 2004 个依赖文件入库）
+*.pom
+*.sha1
+_remote.repositories
+*.lastUpdated
+com/
+org/
+io/
+net/
+ch/
+junit/
+javax/
+jakarta/
+classworlds/
+commons-*/
+tools/jackson/
+redis/clients/
+
 !.mvn/wrapper/maven-wrapper.jar
 .flattened-pom.xml
 *.log
