@@ -8,6 +8,7 @@
     <module>nearslot-common</module><module>nearslot-framework</module>
     <module>nearslot-module-auth</module><module>nearslot-module-shop</module>
     <module>nearslot-module-appointment</module><module>nearslot-module-order</module>
+    <module>nearslot-module-content</module>
     <module>nearslot-module-agent</module><module>nearslot-app</module>
   </modules>
   <properties>
