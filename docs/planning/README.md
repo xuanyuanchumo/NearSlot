@@ -14,6 +14,7 @@ updated: 2026-11-16
 | [tasks.md](tasks.md) | **任务规划 WBS**：39 个任务（NS-P{phase}-T{NN}），含分支/commit scope、代理、验收标准 |
 | [development-plan.md](development-plan.md) | **具体开发计划**：DCIVF 五环闭环模型、追溯矩阵、DoD、统一工作流 |
 | [constraints.md](constraints.md) | **约束登记册**：架构/一致性/安全/文档约束 + 机器检测手段 |
+| [audit-2026-11-17.md](audit-2026-11-17.md) | **现状审计与三版推进方案**：实测数据、根因分析、方案 A/B/C 对比 |
 | [acceptance-matrix.md](acceptance-matrix.md) | **GWT 验收矩阵**：FR-1~5 + SLO-1~11 逐条 Given-When-Then |
 
 ## 阶段详细开发计划（落地与闭环）

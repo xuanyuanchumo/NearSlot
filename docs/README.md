@@ -26,7 +26,11 @@ updated: 2026-09-05
 | security/ | 安全规范 | [guidelines](security/guidelines.md) |
 | agents/ | 四代理协作说明 | [overview](agents/overview.md) |
 | lifecycle/ | **项目生命周期文档目录**（模板+索引，49 份） | [总索引](lifecycle/README.md)（含截图资料→生命周期映射表） |
-| planning/ | 开发里程表与任务规划 | [roadmap](planning/roadmap.md) · [tasks](planning/tasks.md) · [development-plan](planning/development-plan.md)（含 Phase 0–5 详细执行方案） |
+| planning/ | 开发里程表与任务规划（含 [现状审计与三版方案](planning/audit-2026-11-17.md)） | [roadmap](planning/roadmap.md) · [tasks](planning/tasks.md) · [development-plan](planning/development-plan.md)（含 Phase 0–5 详细执行方案） |
+
+## 开工必读
+
+- [研发思维原则与执行规程](提示词.md) —— 每次开发任务开始前必读；含开工前置清单与硬性红线。
 
 ## 文档治理规则（继承 PickNear）
 
