@@ -53,6 +53,35 @@ public class WebExceptionAdvice {
     }
 
     /** 运行时异常兜底。 */
+    /**
+     * 数据库唯一约束冲突 -> 业务语义码。
+     *
+     * 实测缺陷：并发/重复请求时 DB 层唯一约束（uq_user_slot 防一人一时段）
+     * 会抛 DuplicateKeyException，若落到 RuntimeException 兜底就返回
+     * 50001「系统异常」——语义完全错误，用户以为是服务故障，
+     * 实际是系统**正确拒绝**了重复预约。
+     *
+     * 映射规则：约束名含 uq_user_slot -> 50102 重复预约；
+     *          含 uq_slot_occupy  -> 50103 时段已占用；其余保持系统异常。
+     */
+    @ExceptionHandler(org.springframework.dao.DuplicateKeyException.class)
+    public Result<Void> handleDuplicateKey(org.springframework.dao.DuplicateKeyException e,
+                                           HttpServletResponse response) {
+        String msg = String.valueOf(e.getMessage());
+        BaseCode code;
+        if (msg.contains("uq_user_slot")) {
+            code = BaseCode.SLOT_DUPLICATE;
+        } else if (msg.contains("uq_slot_occupy")) {
+            code = BaseCode.SLOT_CLOSED;
+        } else {
+            code = BaseCode.INTERNAL_ERROR;
+        }
+        response.setStatus(org.springframework.http.HttpStatus.OK.value());
+        log.warn("唯一约束冲突已转为业务码 code={} constraint={}",
+            code.getCode(), msg.contains("uq_user_slot") ? "uq_user_slot" : "other");
+        return Result.fail(code);
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public Result<Void> handleRuntime(RuntimeException e, HttpServletResponse response) {
         log.error("未捕获运行时异常", e);
