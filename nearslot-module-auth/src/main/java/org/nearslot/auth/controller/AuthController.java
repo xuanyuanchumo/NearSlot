@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.nearslot.auth.dto.ChangePasswordRequest;
 import org.nearslot.auth.dto.LoginRequest;
 import org.nearslot.auth.dto.LoginResponse;
 import org.nearslot.auth.service.LoginService;
@@ -64,6 +65,19 @@ public class AuthController {
         String newAt = tokenService.refresh(userId, refreshToken);
         response.setHeader("X-Token-Refresh", "ok");
         return Result.ok(newAt);
+    }
+
+    @Operation(summary = "修改密码", description = "校验原密码后改密，并 bump version 踢出所有旧会话")
+    @PostMapping("/password")
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req,
+                                       HttpServletRequest request) {
+        Long userId = currentUserId(request);
+        if (userId == null) {
+            throw new org.nearslot.common.exception.BaseException(
+                org.nearslot.common.enums.BaseCode.UNAUTHORIZED, "未登录");
+        }
+        loginService.changePassword(userId, req.getOldPassword(), req.getNewPassword());
+        return Result.ok(null);
     }
 
     @Operation(summary = "登出", description = "清理四键，旧 AT 立即失效")

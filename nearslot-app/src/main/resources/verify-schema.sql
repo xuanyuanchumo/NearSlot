@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS rollback_failure_log (
 );
 
 -- 验证用种子数据（1 个用户 / 1 个服务商 / 1 个时段）
-MERGE INTO user (id, nickname, password, level) KEY(id) VALUES (1001, 'testuser', 'pass123', 5);
+MERGE INTO user (id, nickname, password, level) KEY(id) VALUES (1001, 'testuser', 'pass12345', 5);
 MERGE INTO user_phone (id, user_id, phone) KEY(id) VALUES (1, 1001, '13800138000');
 MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (1, '验证服务商', 1, 120.15, 30.28, '测试地址');
 MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2001, 1, '验证技师', 3);

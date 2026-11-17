@@ -150,6 +150,44 @@ public class LoginService {
         }
     }
 
+    /**
+     * 修改密码（FR-1.4）。
+     *
+     * 安全要点（security/guidelines.md $1）：
+     *   1. 必须先校验原密码，防止会话被劫持后直接改密；
+     *   2. 新密码 BCrypt 哈希存储；
+     *   3. **改密必须 bump version**，让所有旧 AT 立即失效（"改密踢出"）；
+     *   4. 改密后清理 RT，强制重新登录。
+     *
+     * 若只改密码不 bump，被盗 Token 仍可继续使用，改密形同虚设。
+     */
+    public void changePassword(Long userId, String oldPassword, String newPassword) {
+        User user = userMapper.selectById(userId);
+        if (user == null) throw new BaseException(BaseCode.NOT_FOUND, "用户不存在");
+
+        String stored = user.getPassword() == null ? "" : user.getPassword();
+        boolean ok = stored.startsWith("$2")
+            ? passwordEncoder.matches(oldPassword, stored)
+            : stored.equals(oldPassword);
+        if (!ok) {
+            recordFailure(String.valueOf(userId));
+            throw new BaseException(BaseCode.UNAUTHORIZED, "原密码错误");
+        }
+        if (newPassword.equals(oldPassword)) {
+            throw new BaseException(BaseCode.INTERNAL_ERROR, "新密码不能与原密码相同");
+        }
+
+        User upd = new User();
+        upd.setId(userId);
+        upd.setPassword(passwordEncoder.encode(newPassword));
+        userMapper.updateById(upd);
+
+        // 关键：bump version -> 所有旧 AT 失效；同时清 RT 强制重登
+        tokenService.bumpVersion(userId);
+        tokenService.logout(userId);
+        log.info("密码修改成功，已踢出所有会话 userId={}", userId);
+    }
+
     /** 下发验证码（写入 Redis 60s）。 */
     public void issueCode(String phone, String code) {
         redis.opsForValue().set(RedisConstants.LOGIN_CODE + phone, code, 60, TimeUnit.SECONDS);

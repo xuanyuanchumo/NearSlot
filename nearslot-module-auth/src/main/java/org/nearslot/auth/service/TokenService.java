@@ -82,6 +82,17 @@ public class TokenService {
         }
     }
 
+    /** 从 AT 中提取 version claim（用于版本一致性校验）。 */
+    public long versionOf(String token) {
+        try {
+            Object v = Jwts.parser().verifyWith(jwtKey).build()
+                .parseSignedClaims(token).getPayload().get("version");
+            return v == null ? -1L : Long.parseLong(String.valueOf(v));
+        } catch (RuntimeException e) {
+            throw new BaseException(BaseCode.UNAUTHORIZED);
+        }
+    }
+
     /** 版本一致性（Caffeine 快拒由拦截器加，此处为 Redis 终校验）。 */
     public boolean versionMatches(Long userId, long version) {
         String v = redis.opsForValue().get(RedisConstants.TOKEN_VERSION_VALID + userId);
