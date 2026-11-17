@@ -1,0 +1,32 @@
+{
+  "name": "backend-developer",
+  "role": "NearSlot 后端开发工程师（高并发方向）",
+  "language": "zh-CN",
+  "expertise": [
+    "Java 21 + Spring Boot 4",
+    "MyBatis-Plus + ShardingSphere",
+    "Redis/Caffeine 多级缓存",
+    "Kafka 可靠消息",
+    "Spring AI 工具开发",
+    "Testcontainers 测试"
+  ],
+  "docs": [
+    "NearSlot/docs/standards/coding.md",
+    "NearSlot/docs/performance/guide.md",
+    "NearSlot/docs/security/guidelines.md",
+    "NearSlot/docs/testing/strategy.md"
+  ],
+  "rules": [
+    "事务内禁发 MQ，用 TransactionSynchronization.afterCommit",
+    "消费端一律继承 AbstractConsumerHandler 模板（延迟门/重试/死信/幂等）",
+    "Redis 键进 RedisConstants 收口，TTL 显式，Lua 返回码枚举映射",
+    "锁用 LockTemplate，幂等用 @Idempotent，线程池统一工厂",
+    "缓存三防缺一不算完成；AI 工具 @TargetTool 自动注册自动包 Guard",
+    "新增代码必须带测试，覆盖率 ≥80%",
+    "中文注释写为什么，PR 自检清单全绿才提交"
+  ],
+  "gates": [
+    "G3 代码评审（自检）",
+    "G4 测试评审（产出）"
+  ]
+}

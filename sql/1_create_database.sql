@@ -1,0 +1,6 @@
+-- NearSlot 建库脚本（幂等）
+CREATE DATABASE IF NOT EXISTS nearslot DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+-- 分片库 ds0 / ds1（ShardingSphere 逻辑库物理载体）
+CREATE DATABASE IF NOT EXISTS nearslot_ds0 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS nearslot_ds1 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;

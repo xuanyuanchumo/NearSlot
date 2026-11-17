@@ -1,0 +1,206 @@
+/**
+ * NearSlot 设计令牌（Design Tokens）
+ * 全部 ns- 前缀；组件内禁止硬编码色值 / 间距（docs/research/11-frontend-ux-deep.md §1.3）。
+ *
+ * 响应式断点（mobile-first，min-width 渐进增强）：
+ *   移动  < 768px   单列，底部导航，卡片全宽，时段网格 3 列
+ *   平板  768–1199 双列 / 侧栏可折叠，时段网格 5 列
+ *   桌面  >= 1200px 顶部导航 + 侧栏 + 24 栏栅格，时段网格 7 列
+ *   >= 1440px      内容区最大宽度收束，避免超宽行
+ */
+
+:root {
+  /* ---------- 基础色板 ---------- */
+  --ns-color-brand-500: #2f6bff;
+  --ns-color-brand-600: #1f56d8;
+  --ns-color-brand-50: #eef3ff;
+  --ns-color-success-500: #16a34a;
+  --ns-color-success-50: #ecfdf3;
+  --ns-color-warning-500: #d97706;
+  --ns-color-warning-50: #fff7e6;
+  --ns-color-danger-500: #dc2626;
+  --ns-color-danger-50: #fef2f2;
+  --ns-color-gray-50: #f8fafc;
+  --ns-color-gray-100: #f1f5f9;
+  --ns-color-gray-200: #e2e8f0;
+  --ns-color-gray-400: #94a3b8;
+  --ns-color-gray-600: #475569;
+  --ns-color-gray-900: #0f172a;
+
+  /* ---------- 语义令牌（亮色） ---------- */
+  --ns-bg: #ffffff;
+  --ns-bg-page: var(--ns-color-gray-50);
+  --ns-surface: #ffffff;
+  --ns-fg: #1f2937;
+  --ns-fg-muted: var(--ns-color-gray-600);
+  --ns-border: var(--ns-color-gray-200);
+  --ns-primary: var(--ns-color-brand-500);
+  --ns-primary-hover: var(--ns-color-brand-600);
+  --ns-success: var(--ns-color-success-500);
+  --ns-warning: var(--ns-color-warning-500);
+  --ns-danger: var(--ns-color-danger-500);
+
+  /* 状态语义（时段网格等） */
+  --ns-state-available: var(--ns-color-brand-50);
+  --ns-state-available-fg: var(--ns-color-brand-600);
+  --ns-state-held: var(--ns-color-warning-50);
+  --ns-state-held-fg: var(--ns-color-warning-500);
+  --ns-state-booked: var(--ns-color-gray-100);
+  --ns-state-booked-fg: var(--ns-color-gray-400);
+  --ns-state-danger-bg: var(--ns-color-danger-50);
+
+  /* ---------- 间距（4px 基准） ---------- */
+  --ns-space-1: 4px;
+  --ns-space-2: 8px;
+  --ns-space-3: 12px;
+  --ns-space-4: 16px;
+  --ns-space-6: 24px;
+  --ns-space-8: 32px;
+  --ns-space-inset: var(--ns-space-4);
+  --ns-space-stack: var(--ns-space-4);
+
+  /* ---------- 排版（fluid，320–1920 连续缩放） ---------- */
+  --ns-font-family:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ns-text-caption: 12px;
+  --ns-text-body: clamp(14px, 0.5vw + 12px, 16px);
+  --ns-text-label: 14px;
+  --ns-text-title: clamp(18px, 1vw + 14px, 24px);
+  --ns-text-display: clamp(24px, 2vw + 16px, 32px);
+  --ns-line-height: 1.5;
+
+  /* ---------- 圆角 / 阴影 ---------- */
+  --ns-radius-sm: 4px;
+  --ns-radius-card: 8px;
+  --ns-radius-lg: 12px;
+  --ns-shadow-sm: 0 1px 2px rgb(15 23 42 / 6%);
+  --ns-shadow-md: 0 4px 12px rgb(15 23 42 / 8%);
+  --ns-shadow-popover: 0 8px 24px rgb(15 23 42 / 12%);
+
+  /* ---------- 动效 ---------- */
+  --ns-motion-fast: 100ms;
+  --ns-motion-normal: 200ms;
+  --ns-motion-slow: 300ms;
+  --ns-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ---------- Z-index ---------- */
+  --ns-z-base: 0;
+  --ns-z-dropdown: 1000;
+  --ns-z-modal: 2000;
+  --ns-z-sse-overlay: 2500;
+  --ns-z-toast: 3000;
+
+  /* ---------- 布局 ---------- */
+  --ns-content-max-width: 1200px;
+  --ns-touch-target: 44px;
+}
+
+/* 暗色主题：通过 html[data-theme='dark'] 切换 */
+html[data-theme="dark"] {
+  --ns-bg: #0f172a;
+  --ns-bg-page: #0b1220;
+  --ns-surface: #111c33;
+  --ns-fg: #e2e8f0;
+  --ns-fg-muted: #94a3b8;
+  --ns-border: #1e293b;
+  --ns-state-available: #1e2a4a;
+  --ns-state-booked: #1a2438;
+  --ns-state-held: #3b2a12;
+  --ns-state-danger-bg: #3b1a1a;
+}
+
+/* 尊重系统减少动态偏好：动效归零（WCAG） */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ns-motion-fast: 0.01ms;
+    --ns-motion-normal: 0.01ms;
+    --ns-motion-slow: 0.01ms;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ns-bg-page);
+  color: var(--ns-fg);
+  font-family: var(--ns-font-family);
+  font-size: var(--ns-text-body);
+  line-height: var(--ns-line-height);
+  -webkit-font-smoothing: antialiased;
+  /* 刘海屏安全区 */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+a {
+  color: var(--ns-primary);
+  text-decoration: none;
+}
+
+/* 统一焦点可见（禁止 outline:none 无替代） */
+:focus-visible {
+  outline: 2px solid var(--ns-primary);
+  outline-offset: 2px;
+}
+
+/* 通用页面容器：只用 max-width，禁止固定像素宽度 */
+.ns-page {
+  max-width: var(--ns-content-max-width);
+  margin: 0 auto;
+  padding: var(--ns-space-4);
+}
+
+.ns-card {
+  background: var(--ns-surface);
+  border: 1px solid var(--ns-border);
+  border-radius: var(--ns-radius-card);
+  box-shadow: var(--ns-shadow-sm);
+  padding: var(--ns-space-4);
+}
+
+.ns-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ns-space-4);
+}
+
+.ns-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ns-space-2);
+}
+
+.ns-text-muted {
+  color: var(--ns-fg-muted);
+  font-size: var(--ns-text-caption);
+}
+
+.ns-title {
+  font-size: var(--ns-text-title);
+  font-weight: 600;
+  margin: 0;
+}
+
+/* 触控目标 ≥ 44×44 */
+.ns-touch {
+  min-width: var(--ns-touch-target);
+  min-height: var(--ns-touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 移动端：底部安全留白 */
+@media (max-width: 767px) {
+  .ns-page {
+    padding: var(--ns-space-3);
+  }
+}

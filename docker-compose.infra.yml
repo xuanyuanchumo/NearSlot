@@ -1,0 +1,61 @@
+# NearSlot 本地开发：仅中间件（数据库/缓存/消息）
+# 用法：docker compose -f docker-compose.infra.yml up -d
+# 前后端在本地运行：后端 mvn spring-boot:run，前端 vp dev
+# 生产/联调：docker-compose.yml（全栈，含 app + web）
+name: nearslot-infra
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: nearslot-mysql
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-nearslot}
+      MYSQL_USER: ${MYSQL_USER:-nearslot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请设置 MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请设置 MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Shanghai
+    ports: ["43306:3306"]
+    volumes:
+      - nearslot-mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: nearslot-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?请设置 REDIS_PASSWORD}"]
+    ports: ["46379:6379"]
+    volumes:
+      - nearslot-redis-data:/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: nearslot-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-nearslot}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请设置 RABBITMQ_PASSWORD}
+    ports: ["45672:5672", "45673:15672"]
+    volumes:
+      - nearslot-rabbitmq-data:/var/lib/rabbitmq
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+
+volumes:
+  nearslot-mysql-data:
+  nearslot-redis-data:
+  nearslot-rabbitmq-data:

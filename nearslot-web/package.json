@@ -1,0 +1,45 @@
+{
+  "name": "nearslot-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NearSlot 时段预约系统前端（Vue3 + TypeScript 6 + Vite+ 统一工具链 + Element Plus）",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "check": "vp check",
+    "check:fix": "vp check --fix",
+    "lint": "vp lint",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vp test run",
+    "test:watch": "vp test"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.8.0",
+    "element-plus": "^2.9.0",
+    "json-bigint": "^1.0.0",
+    "pinia": "^3.0.0",
+    "pinia-plugin-persistedstate": "^4.2.0",
+    "vue": "^3.5.45",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/json-bigint": "^1.0.4",
+    "@types/node": "^24.19.2",
+    "@vitejs/plugin-vue": "^6.0.11",
+    "typescript": "~6.0.3",
+    "unplugin-auto-import": "^21.1.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vue-tsc": "^3.3.14"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: nearslot
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      password: ${REDIS_PASSWORD:}
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/${MYSQL_DATABASE:nearslot}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:nearslot}
+    password: ${MYSQL_PASSWORD:}
+server:
+  port: 8081
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+# Knife4j Next（ADR-018）：/doc.html 增强 UI，/v3/api-docs 契约 JSON
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  packages-to-scan: org.nearslot
+
+logging:
+  level:
+    org.nearslot: ${LOG_LEVEL_MODULE:INFO}

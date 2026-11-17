@@ -1,0 +1,113 @@
+# NearSlot CI 五 job 骨架（deployment/guide.md §4；G0 落地，Phase 5 补全镜像/发布）
+name: nearslot-ci
+on:
+  push: { branches: [main, develop] }
+  pull_request: {}
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docs_only:
+              - 'NearSlot/docs/**'
+              - '**/*.md'
+              - '!NearSlot/pom.xml'
+              - '!NearSlot/**/src/**'
+  docs:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python NearSlot/scripts/docs/check_docs.py NearSlot/docs --repo-root .
+  # 契约门禁（ADR-018）：生成 openapi.json 并检测破坏性变更
+  contract:
+    needs: [docs]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - name: 启动应用生成 OpenAPI 契约
+        run: |
+          cd NearSlot
+          mvn -B -q -DskipTests package
+          java -jar nearslot-app/target/nearslot-app-*.jar \
+            --spring.profiles.active=verify --server.port=48081 > /tmp/app.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:48081/v3/api-docs -o /tmp/openapi.json; then break; fi
+            sleep 2
+          done
+          mkdir -p api
+          python -c "import json;d=json.load(open('/tmp/openapi.json'));json.dump(d,open('api/openapi.json','w'),ensure_ascii=False,indent=2,sort_keys=True)"
+      - name: 破坏性变更检测
+        run: |
+          cd NearSlot
+          if git diff --quiet -- api/openapi.json; then
+            echo "契约无变更"
+          else
+            python - <<'PY'
+          import json, subprocess, sys
+          old = json.loads(subprocess.run(['git','show','HEAD:NearSlot/api/openapi.json'],
+                                          capture_output=True, text=True).stdout or '{}')
+          new = json.load(open('api/openapi.json'))
+          breaking = []
+          for path, methods in (old.get('paths') or {}).items():
+              if path not in (new.get('paths') or {}):
+                  breaking.append(f"删除路径 {path}")
+                  continue
+              for m in methods:
+                  if m not in new['paths'][path]:
+                      breaking.append(f"删除方法 {m.upper()} {path}")
+          if breaking:
+              print("检测到破坏性变更，必须升 /api/v{N+1}：")
+              for b in breaking: print(" -", b)
+              sys.exit(1)
+          print("契约变更非破坏性（仅新增/描述调整）")
+          PY
+          fi
+      - name: 契约入库
+        run: |
+          cd NearSlot
+          git add api/openapi.json
+          git diff --cached --quiet || echo "::notice::契约已更新，请随 PR 提交 api/openapi.json"
+  ci:
+    needs: [changes, docs]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: cd NearSlot && mvn -B compile && mvn -B test -DexcludedGroups=integration
+  integration:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: cd NearSlot && mvn -B verify -Dgroups=integration
+  build-image:
+    needs: [ci, integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "镜像构建推送占位（Phase 5 接入 ACR，禁本地 build）"
+  notify:
+    needs: [docs, ci, build-image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "webhook 通知占位（未配置则跳过）"

@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: nearslot
+  data:
+    redis:
+      host: localhost
+      port: 46379
+      password: ${REDIS_PASSWORD:}
+      # 本地验证：docker run --name nearslot-redis-verify -p 46379:6379 redis:7-alpine --requirepass $REDIS_PASSWORD
+  datasource:
+    url: jdbc:h2:mem:nearslot;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+server:
+  port: 48081
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  packages-to-scan: org.nearslot

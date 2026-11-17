@@ -1,0 +1,67 @@
+# NearSlot 开发/单机 compose（ADR-013：密钥全部 .env 强缺省）
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?请设置 MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?请设置 MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请设置 MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请设置 MYSQL_ROOT_PASSWORD}
+    ports: ["43306:3306"]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+    networks: [nearslot-net]
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?请设置 REDIS_PASSWORD}"]
+    ports: ["46379:6379"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      retries: 5
+    networks: [nearslot-net]
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?请设置 RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请设置 RABBITMQ_PASSWORD}
+    ports: ["45672:5672", "45673:15672"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks: [nearslot-net]
+  nearslot-app:
+    image: nearslot-app:local
+    build: .
+    env_file: .env
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports: ["48081:8081"]
+    mem_limit: 1g
+    restart: unless-stopped
+    networks: [nearslot-net]
+
+  # 前端（ADR-015 前后端分离）：Nginx 托管 Vue3 静态资源 + 反代 /api
+  nearslot-web:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nearslot-web/dist:/usr/share/nginx/html:ro
+      - ./nginx/nearslot.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - nearslot-app
+    ports: ["48080:80"]
+    mem_limit: 128m
+    restart: unless-stopped
+    networks: [nearslot-net]
+
+networks:
+  nearslot-net:
+    driver: bridge
