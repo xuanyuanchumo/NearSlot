@@ -21,7 +21,7 @@ updated: 2026-09-05
 | standards/ | 工程化规范（含 [成熟库优先](standards/library-first.md)） | [coding](standards/coding.md) · [git](standards/git.md) · [doc](standards/doc.md) · [frontend(含 UX/UI/响应式)](standards/frontend.md) |
 | quality/ | 质量属性/评审体系/功能需求 | [quality-attributes](quality/quality-attributes.md) · [review-system](quality/review-system.md) · [functional-requirements](quality/functional-requirements.md) |
 | testing/ | 测试体系 | [strategy](testing/strategy.md) |
-| deployment/ | 部署运维 | [guide](deployment/guide.md) · [local-dev(本地开发与容器编排)](deployment/local-dev.md) |
+| deployment/ | 部署运维 | [guide](deployment/guide.md) · [local-dev(本地开发与容器编排)](deployment/local-dev.md) · [docker-mirror(镜像加速)](deployment/docker-mirror.md) |
 | performance/ | 性能设计与压测方法 | [guide](performance/guide.md) |
 | security/ | 安全规范 | [guidelines](security/guidelines.md) |
 | agents/ | 四代理协作说明 | [overview](agents/overview.md) |
