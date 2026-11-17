@@ -30,6 +30,7 @@ class PaymentServiceTest {
     private ReconcileService reconcileService;
     private DistributedLockTemplate lockTemplate;
     private PaymentService paymentService;
+    private TechRankService techRankService;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -44,7 +45,9 @@ class PaymentServiceTest {
         when(lockTemplate.withLock(any(), anyLong(), anyLong(), any()))
             .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(3)).get());
 
-        paymentService = new PaymentService(orderMapper, slotMapper, reconcileService, lockTemplate, redis);
+        techRankService = mock(TechRankService.class);
+        paymentService = new PaymentService(orderMapper, slotMapper, reconcileService,
+            lockTemplate, redis, techRankService);
     }
 
     private AppointmentOrder order(int status) {

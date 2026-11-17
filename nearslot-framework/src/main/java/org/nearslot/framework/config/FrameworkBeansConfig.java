@@ -17,8 +17,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 public class FrameworkBeansConfig {
 
     @Bean
-    public CacheManager cacheManager(StringRedisTemplate redis) {
-        return new CacheManager(redis);
+    public CacheManager cacheManager(StringRedisTemplate redis,
+                                     com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        return new CacheManager(redis, mapper);
     }
 
     @Bean

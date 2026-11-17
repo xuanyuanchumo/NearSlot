@@ -10,17 +10,18 @@ import java.util.function.Function;
 
 /** 多级缓存：Caffeine L1 + Redis L2 + 三防（穿透空值/击穿逻辑过期/雪崩Jitter）。 */
 public class CacheManager {
-    /** JSON 编解码器：用于实体缓存（简单类型不走它）。 */
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-        .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
-        .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    /** JSON 编解码器：由 Spring 容器注入（成熟库优先，禁止手 new）。 */
+    private final ObjectMapper mapper;
 
     private final StringRedisTemplate redis;
     private final Cache<String,String> l1 = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(20)).build();
     private static final ExecutorService REBUILD = Executors.newFixedThreadPool(4, r -> {
         Thread t = new Thread(r, "cache-rebuild"); t.setDaemon(true); return t; });
 
-    public CacheManager(StringRedisTemplate redis) { this.redis = redis; }
+    public CacheManager(StringRedisTemplate redis, ObjectMapper mapper) {
+        this.redis = redis;
+        this.mapper = mapper;
+    }
 
     /** 穿透防护：空值缓存 2min；雪崩防护：TTL 70%~100% 随机。 */
     public <T> T get(String key, Class<T> type, Function<String,T> loader, long ttlSeconds) {
@@ -49,7 +50,7 @@ public class CacheManager {
         if (type == Long.class) return type.cast(Long.valueOf(v));
         if (type == Integer.class) return type.cast(Integer.valueOf(v));
         try {
-            return MAPPER.readValue(v, type);
+            return mapper.readValue(v, type);
         } catch (Exception e) {
             throw new IllegalStateException("缓存反序列化失败 type=" + type.getName(), e);
         }
@@ -62,7 +63,7 @@ public class CacheManager {
             return String.valueOf(v);
         }
         try {
-            return MAPPER.writeValueAsString(v);
+            return mapper.writeValueAsString(v);
         } catch (Exception e) {
             throw new IllegalStateException("缓存序列化失败 type=" + v.getClass().getName(), e);
         }

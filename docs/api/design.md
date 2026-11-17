@@ -82,6 +82,7 @@ updated: 2026-09-05
 | `/api/v1/appointments/{id}/cancel` | POST | 取消（回补反转） | ✅ |
 | `/api/v1/appointments/{slotId}/waitlist` | POST/DELETE | 加入/退出候补 | ✅ |
 | `/api/v1/payments/callback` | POST | 支付回调（幂等） | ❌（网关签名待补） |
+| `/api/v1/tech-rank/{shopId}` | GET | 每日热门技师榜（date/limit） | ❌ |
 | `/api/v1/internal/reconcile/run` | POST | 手动触发对账 | 🔑 X-Admin-Token |
 
 ## 8. 文档与契约

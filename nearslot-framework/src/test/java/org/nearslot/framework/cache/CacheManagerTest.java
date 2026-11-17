@@ -18,7 +18,7 @@ class CacheManagerTest {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String,String> ops = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(ops);
-        CacheManager cm = new CacheManager(redis);
+        CacheManager cm = new CacheManager(redis, new com.fasterxml.jackson.databind.ObjectMapper());
         assertNull(cm.get("miss:1", String.class, k -> null, 60));
         verify(ops).set(eq("miss:1"), eq(""), anyLong(), any());
     }

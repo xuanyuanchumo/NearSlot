@@ -45,6 +45,7 @@ public class PaymentService {
     private final ReconcileService reconcileService;
     private final DistributedLockTemplate lockTemplate;
     private final StringRedisTemplate redis;
+    private final TechRankService techRankService;
 
     /**
      * 支付成功回调。
@@ -103,6 +104,10 @@ public class PaymentService {
         }
         reconcileService.writeBestEffort(orderId, LogType.BOOK, true,
             0, 0, 0, IdGenerator.nextId(), "paid payNo=" + payNo);
+
+        // FR-4.3：支付成功才计入热门技师榜（避免取消/超时造成虚高）
+        techRankService.recordDeal(order.getShopId(), order.getTechnicianId(),
+            java.time.LocalDate.now());
 
         return PayResult.CONFIRMED;
     }
