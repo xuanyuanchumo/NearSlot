@@ -22,7 +22,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(loginInterceptor)
             .addPathPatterns("/api/**").order(1)
             .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/code", "/api/v1/auth/refresh",
-                                "/api/v1/shops/**", "/api/v1/internal/**",
+                                "/api/v1/shops/**",
+                                // 时段查询为公开只读：未登录用户需先浏览时段才能决定是否登录。
+                                // 仅 GET /slots 放行；POST 发布/关闭仍由方法级鉴权兜底（见 SlotController）
+                                "/api/v1/slots",
+                                "/api/v1/internal/**",
                                 "/api/v1/payments/callback", "/actuator/**");
     }
 }

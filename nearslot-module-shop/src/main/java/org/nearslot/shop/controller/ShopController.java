@@ -18,10 +18,25 @@ import java.util.List;
 public class ShopController {
     private final ShopService shopService;
 
+    @Operation(summary = "服务商列表", description = "分页返回，供前端首页加载")
+    @GetMapping
+    public org.nearslot.common.Result<java.util.Map<String, Object>> list(
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size,
+            @RequestParam(value = "typeId", required = false) Long typeId) {
+        return org.nearslot.common.Result.ok(shopService.page(page, size, typeId));
+    }
+
     @Operation(summary = "服务商详情", description = "缓存三防（布隆防穿透 + 空值缓存 + TTL Jitter）")
     @GetMapping("/{id}")
     public Result<Shop> detail(@PathVariable("id") Long id) {
         return Result.ok(shopService.queryById(id));
+    }
+
+    @Operation(summary = "服务商技师列表", description = "按服务商查询技师")
+    @GetMapping("/{id}/technicians")
+    public Result<java.util.List<org.nearslot.shop.entity.Technician>> technicians(@PathVariable("id") Long id) {
+        return Result.ok(shopService.technicians(id));
     }
 
     @Operation(summary = "附近服务商", description = "GEOSEARCH 半径检索，按距离升序返回前 20 条")

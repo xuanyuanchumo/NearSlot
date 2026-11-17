@@ -27,7 +27,8 @@ spring:
         missing-queues-fatal: false
 
 server:
-  port: 48081
+  # 与 dev profile、vite 代理、nginx upstream 统一为 8081
+  port: 8081
 
 # 本地验证默认不起 RabbitMQ：关闭失效广播消费者，改用本地降级 + TTL
 # （实测：MQ 缺失时 @RabbitListener 每 5s 重连刷 ERROR 日志）

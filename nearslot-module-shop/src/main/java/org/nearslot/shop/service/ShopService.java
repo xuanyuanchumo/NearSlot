@@ -30,6 +30,7 @@ public class ShopService {
     private final CacheManager cacheManager;
     private final BloomFilterHandler bloomFilter;
     private final StringRedisTemplate redis;
+    private final org.nearslot.shop.mapper.TechnicianMapper technicianMapper;
 
     private static final String GEO_KEY = "nearslot:geo:shop";
 
@@ -55,6 +56,28 @@ public class ShopService {
         }
         return cacheManager.get(RedisConstants.CACHE_SHOP + id, Shop.class,
             k -> shopMapper.selectById(id), 30 * 60);
+    }
+
+    /** 服务商分页列表（前端首页）。 */
+    public java.util.Map<String, Object> page(int page, int size, Long typeId) {
+        var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<Shop>lambdaQuery();
+        if (typeId != null) q.eq(Shop::getTypeId, typeId);
+        long total = shopMapper.selectCount(q);
+        q.last("LIMIT " + Math.max(1, Math.min(size, 50)) + " OFFSET " + Math.max(0, (page - 1) * size));
+        java.util.List<Shop> items = shopMapper.selectList(q);
+        java.util.Map<String, Object> res = new java.util.LinkedHashMap<>();
+        res.put("items", items);
+        res.put("total", total);
+        res.put("page", page);
+        res.put("size", size);
+        return res;
+    }
+
+    /** 服务商的技师列表。 */
+    public java.util.List<org.nearslot.shop.entity.Technician> technicians(Long shopId) {
+        return technicianMapper.selectList(
+            com.baomidou.mybatisplus.core.toolkit.Wrappers.<org.nearslot.shop.entity.Technician>lambdaQuery()
+                .eq(org.nearslot.shop.entity.Technician::getShopId, shopId));
     }
 
     /** 附近服务商：GEOSEARCH 半径 + 距离升序（FR-2.3）。 */

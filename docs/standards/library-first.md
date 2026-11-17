@@ -72,6 +72,11 @@ updated: 2026-11-17
 | YAML 多个顶级 `spring:` 键 | 启动失败（配置加载期异常，无明确报错） | 同文件只能有一个 `spring:`，子配置须合并 |
 | `BaseException` 的 403 段 | 权限异常误返 HTTP 200，监控无法告警 | `WebExceptionAdvice` 必须按码段完整映射 401/403/404/429 |
 | 拦截器只解析 JWT 不校验 version | `bumpVersion` 形同虚设，改密后旧 AT 仍可访问（**严重安全缺陷**） | 鉴权必须**两级校验**：JWT + Redis 版本一致性；仅验签名不足以"踢出" |
+| 前端代理 502 | Vite 代理指向 8081，后端跑在 48081 | 端口必须三处统一：dev/verify profile、vite proxy、nginx upstream |
+| 布隆过滤器未预热 | 初始化即空集合，所有查询 mightContain=false，**全部详情 404** | 启动必须把已有数据 put 进去；布隆只答"一定不存在"，空集合=全否定 |
+| CacheManager 只支持基础类型 | 缓存实体抛 "unsupported type: class ...Shop" | 实体缓存必须 JSON 序列化；`String.valueOf(entity)` 得到的是 `Shop@hash` 脏数据 |
+| 旧格式缓存残留 | 改序列化方式后仍 500（读到旧 toString 数据） | 序列化格式变更须 flush 缓存或加版本前缀 |
+| 时段查询需登录 | 前端浏览阶段未登录即 401 | 只读查询应放行（GET），写操作才鉴权 |
 | 密码长度校验与种子数据不一致 | 改密后无法恢复原密码（`pass123` 仅 7 位，新规则要求 ≥8） | 校验规则变更时须同步更新种子数据与文档示例 |
 | `updateById` 在 Mockito 中断言 | 编译报"引用不明确"（`T` 与 `Collection<T>` 双重载） | 测试里用 `ArgumentMatchers.<Entity>argThat(...)` 显式指定类型 |
 

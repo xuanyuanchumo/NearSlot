@@ -83,8 +83,15 @@ CREATE TABLE IF NOT EXISTS rollback_failure_log (
 -- 验证用种子数据（1 个用户 / 1 个服务商 / 1 个时段）
 MERGE INTO user (id, nickname, password, level) KEY(id) VALUES (1001, 'testuser', 'pass12345', 5);
 MERGE INTO user_phone (id, user_id, phone) KEY(id) VALUES (1, 1001, '13800138000');
-MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (1, '验证服务商', 1, 120.15, 30.28, '测试地址');
-MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2001, 1, '验证技师', 3);
+-- 服务商（3 家，供前端列表页展示）
+MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (1, '静心养生馆', 1, 120.15, 30.28, '杭州市西湖区文三路 100 号');
+MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (2, '悦享足道', 1, 120.16, 30.29, '杭州市西湖区古翠路 88 号');
+MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (3, '匠心美容 SPA', 2, 120.14, 30.27, '杭州市上城区延安路 200 号');
+-- 技师
+MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2001, 1, '张师傅', 5);
+MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2002, 1, '李师傅', 4);
+MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2003, 2, '王师傅', 3);
+MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2004, 3, '赵师傅', 5);
 -- 时段 3001：无等级门槛；时段 3002：需 Lv8（用于验证等级闸）
 MERGE INTO time_slot (id, shop_id, technician_id, starts_at, ends_at, capacity, status, min_level)
   KEY(id) VALUES (3001, 1, 2001, TIMESTAMP '2026-12-01 10:00:00', TIMESTAMP '2026-12-01 11:00:00', 1, 1, 0);

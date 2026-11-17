@@ -29,6 +29,14 @@ public class SlotController {
             req.getCapacity(), req.getMinLevel()));
     }
 
+    @Operation(summary = "服务商可约时段", description = "按服务商查询 available 时段及其余量")
+    @GetMapping
+    public Result<java.util.List<java.util.Map<String, Object>>> listByShop(
+            @RequestParam("shopId") Long shopId,
+            @RequestParam(value = "date", required = false) String date) {
+        return Result.ok(slotPublishService.listAvailable(shopId, date));
+    }
+
     @Operation(summary = "关闭时段", description = "状态置关闭 + 删余量 + 广播")
     @PostMapping("/{id}/close")
     public Result<Void> close(@PathVariable("id") Long id) {

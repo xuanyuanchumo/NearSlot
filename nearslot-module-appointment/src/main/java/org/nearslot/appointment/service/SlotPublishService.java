@@ -93,6 +93,36 @@ public class SlotPublishService {
         return slot.getId();
     }
 
+    /**
+     * 查询可约时段（前端选时段用）。
+     * 返回时段基本信息 + 实时余量（从 Redis 读，读不到回落 capacity）。
+     */
+    public java.util.List<java.util.Map<String, Object>> listAvailable(Long shopId, String date) {
+        var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<TimeSlot>lambdaQuery()
+            .eq(TimeSlot::getShopId, shopId)
+            .eq(TimeSlot::getStatus, 1)
+            .orderByAsc(TimeSlot::getStartsAt)
+            .last("LIMIT 100");
+        java.util.List<TimeSlot> slots = timeSlotMapper.selectList(q);
+        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+        for (TimeSlot s : slots) {
+            if (date != null && s.getStartsAt() != null
+                && !s.getStartsAt().toLocalDate().toString().equals(date)) continue;
+            String stock = redis.opsForValue().get(RedisConstants.SLOT_STOCK + s.getId());
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", String.valueOf(s.getId()));       // 字符串防精度丢失（ADR-012）
+            m.put("shopId", String.valueOf(s.getShopId()));
+            m.put("technicianId", String.valueOf(s.getTechnicianId()));
+            m.put("startsAt", s.getStartsAt());
+            m.put("endsAt", s.getEndsAt());
+            m.put("capacity", s.getCapacity());
+            m.put("remaining", stock != null ? Integer.parseInt(stock) : s.getCapacity());
+            m.put("minLevel", s.getMinLevel());
+            out.add(m);
+        }
+        return out;
+    }
+
     /** 关闭时段：状态置 2 + 删余量键 + 广播。 */
     @Transactional(rollbackFor = Exception.class)
     public void close(Long slotId) {
