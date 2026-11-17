@@ -13,6 +13,10 @@
     <dependency><groupId>org.nearslot</groupId><artifactId>nearslot-module-order</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>org.nearslot</groupId><artifactId>nearslot-module-agent</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <!-- Actuator + Prometheus：application.yaml 已配置 management.endpoints 暴露，
+         此前缺依赖导致 /actuator/* 全部 404（本轮修复） -->
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+    <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>
     <dependency><groupId>com.baizhukui</groupId><artifactId>knife4j-openapi3-boot4-spring-boot-starter</artifactId><version>${knife4j.version}</version></dependency>
   </dependencies>
   <build><plugins>

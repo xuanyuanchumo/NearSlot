@@ -47,6 +47,16 @@
     </plugin>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><configuration><release>21</release><encoding>UTF-8</encoding><parameters>true</parameters></configuration></plugin>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version><configuration><excludedGroups>integration</excludedGroups></configuration></plugin>
+    <!-- JaCoCo 覆盖率（G4 门禁要求；Phase 4 加固项） -->
+    <plugin>
+      <groupId>org.jacoco</groupId>
+      <artifactId>jacoco-maven-plugin</artifactId>
+      <version>0.8.13</version>
+      <executions>
+        <execution><id>prepare-agent</id><goals><goal>prepare-agent</goal></goals></execution>
+        <execution><id>report</id><phase>test</phase><goals><goal>report</goal></goals></execution>
+      </executions>
+    </plugin>
   </plugins></build>
   <profiles>
     <!-- 集成测试 profile：覆盖默认 excludedGroups=integration（方案 A 的真实验证通道） -->
