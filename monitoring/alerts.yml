@@ -1,0 +1,56 @@
+groups:
+  - name: nearslot-slo
+    rules:
+      # --- 可用性 ---
+      - alert: AppDown
+        expr: up{job="nearslot-app"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "NearSlot 应用不可达"
+          description: "{{ $labels.instance }} 已超过 1 分钟无法抓取指标"
+
+      # --- 性能：SLO 抢约 P99 <= 200ms ---
+      - alert: BookingP99High
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{uri=~".*appointments.*"}[5m]))) > 0.2
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "抢约链路 P99 超过 200ms SLO"
+          description: "当前 P99 = {{ $value | humanizeDuration }}"
+
+      # --- 性能：整体 5xx 错误率 ---
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          / sum(rate(http_server_requests_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx 错误率超过 1%"
+          description: "当前错误率 = {{ $value | humanizePercentage }}"
+
+      # --- 一致性：对账 ABNORMAL 必须为 0 ---
+      - alert: ReconcileAbnormal
+        expr: nearslot_reconcile_abnormal_total > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "对账发现不一致订单（SLO 要求必须为 0）"
+          description: "ABNORMAL 数量 = {{ $value }}"
+
+      # --- 资源 ---
+      - alert: JvmHeapHigh
+        expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "JVM 堆使用率超过 85%"
+          description: "当前 = {{ $value | humanizePercentage }}"
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Redis 不可达"

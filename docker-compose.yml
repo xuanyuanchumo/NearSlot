@@ -44,9 +44,19 @@ services:
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }
+      # 应用启动时会注册 MQ 消费者与交换机，rabbitmq 未就绪会导致启动重试
+      rabbitmq: { condition: service_healthy }
     ports: ["48081:8081"]
     mem_limit: 1g
     restart: unless-stopped
+    # 应用级健康检查：此前缺失，导致容器"启动了但服务不可用"无法被 compose 感知
+    # 依据 actuator 暴露的 /actuator/health（本轮已修好 404 问题）
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q --spider http://localhost:8081/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
     networks: [nearslot-net]
 
   # 前端（ADR-015 前后端分离）：Nginx 托管 Vue3 静态资源 + 反代 /api
@@ -62,6 +72,39 @@ services:
     restart: unless-stopped
     networks: [nearslot-net]
 
+  # --- 监控（G5 发布门禁要求：可观测性）---
+  # 启动方式：docker compose --profile monitoring up -d
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    profiles: ["monitoring"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports: ["48090:9090"]
+    restart: unless-stopped
+    networks: [nearslot-net]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports: ["48091:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+    networks: [nearslot-net]
+
 networks:
   nearslot-net:
     driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

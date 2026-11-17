@@ -19,5 +19,10 @@
     <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers</artifactId><version>1.21.3</version><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><version>1.21.3</version><scope>test</scope></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-redis</artifactId><scope>test</scope></dependency>
+    <!-- 业务指标埋点（G5 监控）：对账 ABNORMAL 是 SLO 硬指标，需暴露给 Prometheus -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+    </dependency>
   </dependencies>
 </project>

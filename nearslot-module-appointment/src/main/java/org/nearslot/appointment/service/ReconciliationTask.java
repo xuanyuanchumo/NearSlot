@@ -47,6 +47,9 @@ public class ReconciliationTask {
     private final AppointmentOrderMapper orderMapper;
     private final ReconcileLogMapper logMapper;
     private final StringRedisTemplate redis;
+    /** 业务指标出口（可选注入，便于单测不依赖 Micrometer）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Scheduled(fixedDelay = RECONCILE_INTERVAL_MS)
     public void reconcile() {
@@ -68,6 +71,18 @@ public class ReconciliationTask {
         }
         log.info("对账完成：一致={} 异常={} 在途跳过={} 总计={}",
             consistent, abnormal, inFlight, pending.size());
+
+        // 业务指标（G5 监控要求）：对账结果是 SLO 硬指标，必须可被 Prometheus 抓取
+        if (meterRegistry != null) {
+            meterRegistry.counter("nearslot.reconcile.orders",
+                "verdict", "consistent").increment(consistent);
+            meterRegistry.counter("nearslot.reconcile.orders",
+                "verdict", "in_flight").increment(inFlight);
+            if (abnormal > 0) {
+                meterRegistry.counter("nearslot.reconcile.abnormal").increment(abnormal);
+            }
+        }
+
         if (abnormal > 0) {
             log.error("对账发现 {} 笔不一致，需立即排查（SLO：ABNORMAL 必须为 0）", abnormal);
         }
