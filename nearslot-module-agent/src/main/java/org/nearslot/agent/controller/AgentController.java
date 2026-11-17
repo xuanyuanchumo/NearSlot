@@ -72,7 +72,8 @@ public class AgentController {
             emitter.send(SseEvent.plan(seq.incrementAndGet(), stepTexts));
 
             for (TwoPhasePlanner.PlanStep step : plan.steps()) {
-                emitter.send(SseEvent.progress(seq.incrementAndGet(), step.tool(), "DONE"));
+                String result = planner.execute(step, userId, input);
+                emitter.send(SseEvent.progress(seq.incrementAndGet(), step.tool(), result));
             }
             emitter.complete();
         } catch (Exception e) {

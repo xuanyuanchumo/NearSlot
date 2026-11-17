@@ -8,7 +8,13 @@
     <dependency><groupId>org.nearslot</groupId><artifactId>nearslot-common</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>org.nearslot</groupId><artifactId>nearslot-framework</artifactId><version>${project.version}</version></dependency>
     <!-- ADR-023：Spring AI 2.0.1（成熟库优先，禁自研 LLM 调用层） -->
-    <dependency><groupId>org.springframework.ai</groupId><artifactId>spring-ai-starter-model-openai</artifactId></dependency>
+    <!-- optional：未配置 API Key 时不参与自动装配，避免启动失败。
+         Phase 3 正式接入 LLM 时移除 optional 并配置 spring.ai.openai.* -->
+    <dependency>
+      <groupId>org.springframework.ai</groupId>
+      <artifactId>spring-ai-starter-model-openai</artifactId>
+      <optional>true</optional>
+    </dependency>
       <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
     <dependency><groupId>io.swagger.core.v3</groupId><artifactId>swagger-annotations-jakarta</artifactId><version>2.2.55</version></dependency>
