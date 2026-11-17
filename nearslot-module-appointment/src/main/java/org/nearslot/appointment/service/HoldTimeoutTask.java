@@ -104,7 +104,7 @@ public class HoldTimeoutTask {
         long startTs = slot.getStartsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         long endTs = slot.getEndsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         BookResult r = luaService.rollback(fresh.getUserId(), fresh.getSlotId(),
-            fresh.getTechnicianId(), startTs, endTs, fresh.getId(), IdGenerator.nextId(), 1);
+            fresh.getServiceStaffId(), startTs, endTs, fresh.getId(), IdGenerator.nextId(), 1);
 
         if (r.success()) {
             log.info("Hold 超时回补成功 orderId={} logType={}", fresh.getId(), LogType.RESTORE.getCode());

@@ -13,7 +13,8 @@ public class TimeSlot {
     @TableId(type = IdType.INPUT)
     private Long id;
     private Long shopId;
-    private Long technicianId;
+    /** 履约执行者（ADR-021：餐品预约可为 null）。 */
+    private Long serviceStaffId;
     private Long serviceItemId;
     private LocalDateTime startsAt;
     private LocalDateTime endsAt;

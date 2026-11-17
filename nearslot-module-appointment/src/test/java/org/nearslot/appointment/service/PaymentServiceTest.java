@@ -31,6 +31,7 @@ class PaymentServiceTest {
     private DistributedLockTemplate lockTemplate;
     private PaymentService paymentService;
     private TechRankService techRankService;
+    private PrepareReminderService prepareReminderService;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -46,8 +47,9 @@ class PaymentServiceTest {
             .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(3)).get());
 
         techRankService = mock(TechRankService.class);
+        prepareReminderService = mock(PrepareReminderService.class);
         paymentService = new PaymentService(orderMapper, slotMapper, reconcileService,
-            lockTemplate, redis, techRankService);
+            lockTemplate, redis, techRankService, prepareReminderService);
     }
 
     private AppointmentOrder order(int status) {
@@ -55,7 +57,7 @@ class PaymentServiceTest {
         o.setId(1001L);
         o.setUserId(2001L);
         o.setSlotId(3001L);
-        o.setTechnicianId(4001L);
+        o.setServiceStaffId(4001L);
         o.setStatus(status);
         return o;
     }

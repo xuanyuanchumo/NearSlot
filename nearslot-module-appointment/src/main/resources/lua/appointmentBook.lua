@@ -2,7 +2,7 @@
 -- KEYS[1] = slot:stock:{slotId}   String 余量
 -- KEYS[2] = slot:user:{slotId}    Set 已约用户
 -- KEYS[3] = slot:trace:{slotId}   Hash traceId -> 日志
--- KEYS[4] = tech:timeline:{techId} ZSet member="slotId#endsAt" score=startsAt（技师时间轴）
+-- KEYS[4] = staff:timeline:{techId} ZSet member="slotId#endsAt" score=startsAt（技师时间轴）
 -- ARGV[1]=userId  [2]=slotId  [3]=techId  [4]=startTs  [5]=endTs
 -- ARGV[6]=orderId [7]=traceId [8]=ttlSeconds [9]=capacity
 local stockKey, userKey, traceKey, timelineKey = KEYS[1], KEYS[2], KEYS[3], KEYS[4]

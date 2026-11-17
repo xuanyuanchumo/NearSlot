@@ -17,4 +17,8 @@ public class ServiceItem {
     private Integer durationMin;
     /** 价格（分），避免浮点精度丢失。 */
     private Integer priceCent;
+    /** ADR-020：SERVICE服务 / PRODUCT商品（餐品预约）。 */
+    private String itemType;
+    /** ADR-022：店铺准备提前量（分钟）。 */
+    private Integer leadTimeMin;
 }

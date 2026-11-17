@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
  * 时段发布（FR-2.2）。
  *
  * 一次发布要做三件事：
- *   1. 落库时段定义（幂等：按 technicianId+startsAt 唯一约束）；
+ *   1. 落库时段定义（幂等：按 serviceStaffId+startsAt 唯一约束）；
  *   2. 预热 Redis 余量（Redis 主、DB 兜底，schema.md §2）；
  *   3. **广播缓存失效**，让所有实例的本地 Caffeine L1 同步失效。
  *
@@ -43,7 +43,7 @@ public class SlotPublishService {
 
     /** 发布时段（幂等）。 */
     @Transactional(rollbackFor = Exception.class)
-    public Long publish(Long shopId, Long technicianId, Long serviceItemId,
+    public Long publish(Long shopId, Long serviceStaffId, Long serviceItemId,
                         LocalDateTime startsAt, LocalDateTime endsAt,
                         int capacity, Integer minLevel) {
         if (capacity <= 0) throw new BaseException(BaseCode.INTERNAL_ERROR, "容量必须大于 0");
@@ -53,7 +53,7 @@ public class SlotPublishService {
         TimeSlot slot = new TimeSlot();
         slot.setId(IdGenerator.nextId());
         slot.setShopId(shopId);
-        slot.setTechnicianId(technicianId);
+        slot.setServiceStaffId(serviceStaffId);
         slot.setServiceItemId(serviceItemId == null ? 0L : serviceItemId);
         slot.setStartsAt(startsAt);
         slot.setEndsAt(endsAt);
@@ -90,7 +90,7 @@ public class SlotPublishService {
         reminderService.scheduleForSlot(slot.getId());
 
         log.info("时段已发布 slotId={} shopId={} techId={} capacity={} minLevel={}",
-            slot.getId(), shopId, technicianId, capacity, slot.getMinLevel());
+            slot.getId(), shopId, serviceStaffId, capacity, slot.getMinLevel());
         return slot.getId();
     }
 
@@ -115,12 +115,12 @@ public class SlotPublishService {
         for (TimeSlot s : slots) {
             if (date != null && s.getStartsAt() != null
                 && !s.getStartsAt().toLocalDate().toString().equals(date)) continue;
-            if (allowedStaff != null && !allowedStaff.contains(s.getTechnicianId())) continue;
+            if (allowedStaff != null && !allowedStaff.contains(s.getServiceStaffId())) continue;
             String stock = redis.opsForValue().get(RedisConstants.SLOT_STOCK + s.getId());
             java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", String.valueOf(s.getId()));       // 字符串防精度丢失（ADR-012）
             m.put("shopId", String.valueOf(s.getShopId()));
-            m.put("technicianId", String.valueOf(s.getTechnicianId()));
+            m.put("serviceStaffId", String.valueOf(s.getServiceStaffId()));
             m.put("startsAt", s.getStartsAt());
             m.put("endsAt", s.getEndsAt());
             m.put("capacity", s.getCapacity());

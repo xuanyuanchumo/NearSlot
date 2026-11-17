@@ -53,7 +53,7 @@ public class TechRankService {
         for (var t : tuples) {
             Map<String, Object> row = new java.util.LinkedHashMap<>();
             row.put("rank", rank++);
-            row.put("technicianId", t.getValue());
+            row.put("serviceStaffId", t.getValue());
             row.put("deals", t.getScore() == null ? 0 : t.getScore().intValue());
             out.add(row);
         }

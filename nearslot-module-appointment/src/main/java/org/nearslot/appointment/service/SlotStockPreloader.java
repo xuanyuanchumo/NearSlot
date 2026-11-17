@@ -35,12 +35,14 @@ public class SlotStockPreloader {
 
     private final org.nearslot.appointment.service.HoldTimeoutTask holdTimeoutTask;
     private final org.nearslot.appointment.service.ReminderService reminderService;
+    private final org.nearslot.appointment.service.PrepareReminderService prepareReminderService;
 
     @Bean
     public ApplicationRunner delayQueueConsumerStarter() {
         return args -> {
             holdTimeoutTask.startConsumer();
             reminderService.startConsumer();
+            prepareReminderService.startConsumer();
         };
     }
 

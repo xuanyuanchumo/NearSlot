@@ -40,12 +40,19 @@ public class PaymentService {
 
     private static final String PAY_LOCK = RedisConstants.LOCK + "pay:";
 
+    /**
+     * 准备提前量（ADR-022）。v1 无履约项关联表，默认 0（不提醒）；
+     * v2 接入 appointment_item 后从履约项 service_item.lead_time_min 读取。
+     */
+    private int resolveLeadTime(AppointmentOrder order) { return 0; }
+
     private final AppointmentOrderMapper orderMapper;
     private final TimeSlotMapper timeSlotMapper;
     private final ReconcileService reconcileService;
     private final DistributedLockTemplate lockTemplate;
     private final StringRedisTemplate redis;
     private final TechRankService techRankService;
+    private final PrepareReminderService prepareReminderService;
 
     /**
      * 支付成功回调。
@@ -106,8 +113,15 @@ public class PaymentService {
             0, 0, 0, IdGenerator.nextId(), "paid payNo=" + payNo);
 
         // FR-4.3：支付成功才计入热门技师榜（避免取消/超时造成虚高）
-        techRankService.recordDeal(order.getShopId(), order.getTechnicianId(),
+        techRankService.recordDeal(order.getShopId(), order.getServiceStaffId(),
             java.time.LocalDate.now());
+
+        // ADR-022：店铺准备提醒（v1 默认 lead=0 不提醒，店铺配置后才生效）
+        // 复用上方已加载的 slot（timeSlotMapper），避免重复查询
+        if (slot != null) {
+            prepareReminderService.schedule(orderId, slot.getStartsAt(),
+                resolveLeadTime(order));
+        }
 
         return PayResult.CONFIRMED;
     }

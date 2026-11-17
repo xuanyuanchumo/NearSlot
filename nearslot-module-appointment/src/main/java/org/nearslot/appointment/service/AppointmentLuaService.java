@@ -49,7 +49,7 @@ public class AppointmentLuaService {
             List.of(RedisConstants.SLOT_STOCK + slotId,
                     RedisConstants.SLOT_USER + slotId,
                     RedisConstants.SLOT_TRACE + slotId,
-                    RedisConstants.TECH_RANK + "timeline:" + techId),
+                    RedisConstants.PREFIX + "staff:timeline:" + techId),
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(endTs),
             String.valueOf(orderId), String.valueOf(traceId),
@@ -64,7 +64,7 @@ public class AppointmentLuaService {
             List.of(RedisConstants.SLOT_STOCK + slotId,
                     RedisConstants.SLOT_USER + slotId,
                     RedisConstants.SLOT_TRACE + slotId,
-                    RedisConstants.TECH_RANK + "timeline:" + techId),
+                    RedisConstants.PREFIX + "staff:timeline:" + techId),
             String.valueOf(userId), String.valueOf(slotId), String.valueOf(techId),
             String.valueOf(startTs), String.valueOf(orderId), String.valueOf(traceId),
             String.valueOf(operate), "86400", String.valueOf(endTs));

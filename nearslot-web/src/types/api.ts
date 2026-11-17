@@ -93,7 +93,7 @@ export const SLOT_STATUS_TEXT: Record<SlotStatus, string> = {
 export interface TimeSlot {
   id: string;
   shopId: string;
-  technicianId?: string;
+  serviceStaffId?: string;
   /** UTC 瞬时（ISO-8601），展示时必须配合 tzId 渲染墙钟时间 */
   startsAt: string;
   /** IANA 时区，如 Asia/Shanghai；禁止用浏览器本地时区替代 */
@@ -134,7 +134,7 @@ export interface Appointment {
   slotId: string;
   shopId: string;
   shopName?: string;
-  technicianId?: string;
+  serviceStaffId?: string;
   technicianName?: string;
   userId: string;
   status: AppointmentStatus;

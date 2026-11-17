@@ -32,7 +32,7 @@ export function fetchTechnicians(shopId: string): Promise<Technician[]> {
 export interface SlotQuery {
   /** 日期 YYYY-MM-DD（按服务商时区解释） */
   date: string;
-  technicianId?: string;
+  serviceStaffId?: string;
 }
 
 /** 指定日期的时段网格 */

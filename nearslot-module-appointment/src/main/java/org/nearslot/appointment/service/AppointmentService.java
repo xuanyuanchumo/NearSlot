@@ -72,7 +72,7 @@ public class AppointmentService {
         long orderId = nextId();
         long traceId = nextId();
 
-        BookResult r = luaService.book(userId, slotId, slot.getTechnicianId(), startTs, endTs, orderId, traceId);
+        BookResult r = luaService.book(userId, slotId, slot.getServiceStaffId(), startTs, endTs, orderId, traceId);
         if (!r.success()) {
             throw new BaseException(BaseCode.of(r.getCode()));
         }
@@ -84,7 +84,7 @@ public class AppointmentService {
             holdTimeoutTask.scheduleExpire(created, HOLD_MINUTES * 60);
         } catch (RuntimeException e) {
             // 落库失败必须回补，否则余量泄漏
-            luaService.rollback(userId, slotId, slot.getTechnicianId(), startTs, endTs, orderId, traceId, 1);
+            luaService.rollback(userId, slotId, slot.getServiceStaffId(), startTs, endTs, orderId, traceId, 1);
             throw e;
         }
         // 对账日志（best-effort）：写入失败不影响下单，但对账任务会因此判 ABNORMAL，
@@ -104,7 +104,11 @@ public class AppointmentService {
         o.setUserId(userId);
         o.setSlotId(slot.getId());
         o.setShopId(slot.getShopId());
-        o.setTechnicianId(slot.getTechnicianId());
+        o.setServiceStaffId(slot.getServiceStaffId());
+        // ADR-021 双写 + ADR-022 履约方式默认
+        o.setServiceStaffId(slot.getServiceStaffId() != null
+            ? slot.getServiceStaffId() : slot.getServiceStaffId());
+        if (o.getFulfillmentMode() == null) o.setFulfillmentMode("DOOR_TO_DOOR");
         o.setStatus(OrderStatus.PENDING.getCode());
         o.setAmountCent(0);
         o.setHoldExpiresAt(LocalDateTime.now().plusMinutes(HOLD_MINUTES));
@@ -147,7 +151,7 @@ public class AppointmentService {
         o.setStatus(OrderStatus.CANCELLED.getCode());
         orderMapper.updateById(o);
 
-        BookResult rb = luaService.rollback(userId, o.getSlotId(), o.getTechnicianId(),
+        BookResult rb = luaService.rollback(userId, o.getSlotId(), o.getServiceStaffId(),
             startTs, endTs, orderId, traceId, 1);
         // 回补结果同样入对账日志（成功/失败都记，便于三方互证）
         reconcileService.writeBestEffort(orderId, LogType.RESTORE, rb.success(),

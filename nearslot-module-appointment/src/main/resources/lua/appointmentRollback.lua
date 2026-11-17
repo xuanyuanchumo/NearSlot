@@ -1,6 +1,6 @@
 -- 回补脚本（ADR-005：反转 before/after 语义；del 库存键等待重载防漂移）
 -- KEYS[1]=slot:stock:{slotId} KEYS[2]=slot:user:{slotId}
--- KEYS[3]=slot:trace:{slotId} KEYS[4]=tech:timeline:{techId}
+-- KEYS[3]=slot:trace:{slotId} KEYS[4]=staff:timeline:{techId}
 -- ARGV[1]=userId [2]=slotId [3]=techId [4]=startTs [5]=orderId [6]=traceId
 -- ARGV[7]=operate(1=同时移除用户标记) [8]=ttlSeconds [9]=endTs
 local stockKey, userKey, traceKey, timelineKey = KEYS[1], KEYS[2], KEYS[3], KEYS[4]

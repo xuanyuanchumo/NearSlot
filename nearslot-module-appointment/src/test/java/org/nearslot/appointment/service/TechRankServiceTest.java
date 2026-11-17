@@ -64,7 +64,7 @@ class TechRankServiceTest {
 
         assertEquals(2, rows.size());
         assertEquals(1, rows.get(0).get("rank"));
-        assertEquals("2001", rows.get(0).get("technicianId"));
+        assertEquals("2001", rows.get(0).get("serviceStaffId"));
         assertEquals(5, rows.get(0).get("deals"));
         assertEquals(2, rows.get(1).get("rank"));
     }

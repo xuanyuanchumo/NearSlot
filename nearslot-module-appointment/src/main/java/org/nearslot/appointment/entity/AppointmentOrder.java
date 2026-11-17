@@ -15,7 +15,10 @@ public class AppointmentOrder {
     private Long userId;
     private Long slotId;
     private Long shopId;
-    private Long technicianId;
+    /** 履约执行者（ADR-021）。 */
+    private Long serviceStaffId;
+    /** 履约方式：DINE_IN/PICKUP/TAKEAWAY/DOOR_TO_DOOR（ADR-022）。 */
+    private String fulfillmentMode;
     private Integer status;
     private Integer amountCent;
     private LocalDateTime holdExpiresAt;
