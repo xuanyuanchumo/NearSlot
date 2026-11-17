@@ -30,6 +30,23 @@ public class AppointmentController {
         return Result.ok(orderId);
     }
 
+    /** 订单详情：GET /api/v1/appointments/{id}（FR-4.1）。 */
+    @Operation(summary = "订单详情", description = "按订单号查询；校验归属防止越权",
+        security = @SecurityRequirement(name = "bearerAuth"))
+    @GetMapping("/{id}")
+    public Result<org.nearslot.appointment.entity.AppointmentOrder> detail(@PathVariable("id") Long id) {
+        return Result.ok(appointmentService.queryOrder(UserHolder.get(), id));
+    }
+
+    /** 我的订单列表：GET /api/v1/appointments。 */
+    @Operation(summary = "我的订单", description = "按状态过滤，游标分页",
+        security = @SecurityRequirement(name = "bearerAuth"))
+    @GetMapping
+    public Result<java.util.List<org.nearslot.appointment.entity.AppointmentOrder>> myOrders(
+            @RequestParam(value = "status", required = false) Integer status) {
+        return Result.ok(appointmentService.listMyOrders(UserHolder.get(), status));
+    }
+
     /** 加入候补：POST /api/v1/appointments/{slotId}/waitlist。 */
     @Operation(summary = "加入候补", description = "ZSet 公平排序（时间戳+抖动），返回位次；已存在返回原序位",
         security = @SecurityRequirement(name = "bearerAuth"))

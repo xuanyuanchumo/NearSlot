@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS time_slot (
   capacity INT DEFAULT 1,
   status TINYINT DEFAULT 1,
   version INT DEFAULT 0,
+  min_level INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -84,5 +85,8 @@ MERGE INTO user (id, nickname, password, level) KEY(id) VALUES (1001, 'testuser'
 MERGE INTO user_phone (id, user_id, phone) KEY(id) VALUES (1, 1001, '13800138000');
 MERGE INTO shop (id, name, type_id, x, y, address) KEY(id) VALUES (1, '验证服务商', 1, 120.15, 30.28, '测试地址');
 MERGE INTO technician (id, shop_id, name, level) KEY(id) VALUES (2001, 1, '验证技师', 3);
-MERGE INTO time_slot (id, shop_id, technician_id, starts_at, ends_at, capacity, status)
-  KEY(id) VALUES (3001, 1, 2001, TIMESTAMP '2026-12-01 10:00:00', TIMESTAMP '2026-12-01 11:00:00', 1, 1);
+-- 时段 3001：无等级门槛；时段 3002：需 Lv8（用于验证等级闸）
+MERGE INTO time_slot (id, shop_id, technician_id, starts_at, ends_at, capacity, status, min_level)
+  KEY(id) VALUES (3001, 1, 2001, TIMESTAMP '2026-12-01 10:00:00', TIMESTAMP '2026-12-01 11:00:00', 1, 1, 0);
+MERGE INTO time_slot (id, shop_id, technician_id, starts_at, ends_at, capacity, status, min_level)
+  KEY(id) VALUES (3002, 1, 2001, TIMESTAMP '2026-12-01 14:00:00', TIMESTAMP '2026-12-01 15:00:00', 1, 1, 8);

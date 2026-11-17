@@ -21,4 +21,6 @@ public class TimeSlot {
     private Integer capacity;
     private Integer status;
     private Integer version;
+    /** 预约该时段所需最低会员等级（0=无门槛）。 */
+    private Integer minLevel;
 }

@@ -34,6 +34,8 @@ public class AppointmentService {
     private final DistributedLockTemplate lockTemplate;
     private final HoldTimeoutTask holdTimeoutTask;
     private final ReconcileService reconcileService;
+    /** 等级校验走 common 接口，避免 appointment 直接依赖 auth 模块（C-ARCH-01）。 */
+    private final org.nearslot.common.api.UserLevelQuery userLevelQuery;
 
     /**
      * 分布式 ID：直接用 MyBatis-Plus 的 IdWorker（成熟库优先，ADR-016）。
@@ -50,6 +52,16 @@ public class AppointmentService {
         TimeSlot slot = timeSlotMapper.selectById(slotId);
         if (slot == null) throw new BaseException(BaseCode.NOT_FOUND);
         if (slot.getStatus() == null || slot.getStatus() != 1) throw new BaseException(BaseCode.SLOT_CLOSED);
+
+        // FR-1.4 会员等级闸：等级不足直接拒绝（在 Lua 之前短路，避免无效 Redis 写入）
+        int minLevel = slot.getMinLevel() == null ? 0 : slot.getMinLevel();
+        if (minLevel > 0) {
+            int userLevel = userLevelQuery.levelOf(userId);
+            if (userLevel < minLevel) {
+                throw new BaseException(BaseCode.LEVEL_NOT_MET,
+                    "需 Lv" + minLevel + " 及以上会员，当前 Lv" + userLevel);
+            }
+        }
 
         long startTs = slot.getStartsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         long endTs = slot.getEndsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
@@ -95,6 +107,26 @@ public class AppointmentService {
         o.setAmountCent(0);
         o.setHoldExpiresAt(LocalDateTime.now().plusMinutes(HOLD_MINUTES));
         orderMapper.insert(o);
+    }
+
+    /** 订单详情（FR-4.1）：校验归属防越权。 */
+    public AppointmentOrder queryOrder(Long userId, Long orderId) {
+        AppointmentOrder o = orderMapper.selectById(orderId);
+        if (o == null) throw new BaseException(BaseCode.NOT_FOUND);
+        if (!o.getUserId().equals(userId)) {
+            // 越权访问：不暴露订单是否存在，统一按 NOT_FOUND
+            throw new BaseException(BaseCode.NOT_FOUND);
+        }
+        return o;
+    }
+
+    /** 我的订单列表（FR-4.1），按创建时间倒序。 */
+    public java.util.List<AppointmentOrder> listMyOrders(Long userId, Integer status) {
+        var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<AppointmentOrder>lambdaQuery()
+            .eq(AppointmentOrder::getUserId, userId);
+        if (status != null) q.eq(AppointmentOrder::getStatus, status);
+        q.orderByDesc(AppointmentOrder::getId).last("LIMIT 50");
+        return orderMapper.selectList(q);
     }
 
     /** 取消：状态机校验 → 回补反转 → 触发候补（异步由 MQ 承载）。 */

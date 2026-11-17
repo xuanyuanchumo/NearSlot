@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.nearslot.auth.dto.LoginRequest;
 import org.nearslot.auth.dto.LoginResponse;
 import org.nearslot.auth.service.LoginService;
+import org.nearslot.auth.service.TokenService;
 import org.nearslot.common.Result;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +25,7 @@ public class AuthController {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final LoginService loginService;
+    private final TokenService tokenService;
 
     @Operation(summary = "登录", description = "支持 password / code 两种类型；BCrypt 校验 + IP/账号双维度防爆破")
     @PostMapping("/login")
@@ -46,6 +48,41 @@ public class AuthController {
         String code = String.format("%06d", RANDOM.nextInt(1_000_000));
         loginService.issueCode(phone, code);
         return Result.ok(code);
+    }
+
+    @Operation(summary = "刷新令牌", description = "旧 RT 换新 AT；并发刷新由 422 自愈返回最新 AT")
+    @PostMapping("/refresh")
+    public Result<String> refresh(@RequestHeader(value = "Refresh-Token", required = false) String rt,
+                                  @CookieValue(value = "Refresh-Token", required = false) String cookieRt,
+                                  HttpServletResponse response) {
+        String refreshToken = (rt != null && !rt.isBlank()) ? rt : cookieRt;
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new org.nearslot.common.exception.BaseException(
+                org.nearslot.common.enums.BaseCode.UNAUTHORIZED, "缺少 Refresh-Token");
+        }
+        Long userId = tokenService.parseUserIdFromRefresh(refreshToken);
+        String newAt = tokenService.refresh(userId, refreshToken);
+        response.setHeader("X-Token-Refresh", "ok");
+        return Result.ok(newAt);
+    }
+
+    @Operation(summary = "登出", description = "清理四键，旧 AT 立即失效")
+    @PostMapping("/logout")
+    public Result<Void> logout(HttpServletRequest request) {
+        Long userId = currentUserId(request);
+        if (userId != null) tokenService.logout(userId);
+        return Result.ok(null);
+    }
+
+    private Long currentUserId(HttpServletRequest request) {
+        Object uid = request.getAttribute("userId");
+        if (uid instanceof Long l) return l;
+        String auth = request.getHeader("authorization");
+        if (auth != null && auth.startsWith("Bearer ")) {
+            try { return tokenService.parseUserId(auth.substring(7).trim()); }
+            catch (RuntimeException ignored) { return null; }
+        }
+        return null;
     }
 
     /** 取真实客户端 IP（Nginx 反代场景优先 X-Forwarded-For）。 */

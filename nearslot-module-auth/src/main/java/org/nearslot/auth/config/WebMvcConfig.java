@@ -21,7 +21,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
             .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/code", "/actuator/**");
         registry.addInterceptor(loginInterceptor)
             .addPathPatterns("/api/**").order(1)
-            .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/code", "/api/v1/shops/**",
-                                "/api/v1/internal/**", "/actuator/**");
+            .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/code", "/api/v1/auth/refresh",
+                                "/api/v1/shops/**", "/api/v1/internal/**",
+                                "/api/v1/payments/callback", "/actuator/**");
     }
 }
