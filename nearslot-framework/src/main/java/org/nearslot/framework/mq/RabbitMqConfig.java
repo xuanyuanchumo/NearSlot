@@ -16,6 +16,11 @@ public class RabbitMqConfig {
     public static final String APPOINTMENT_DLQ = "nearslot.appointment.dlq";
     public static final String ROUTING_KEY = "appointment.created";
 
+    /** 缓存失效广播交换机（fanout：每实例独占匿名队列，天然广播，ADR-014）。 */
+    public static final String INVALIDATION_FANOUT = "nearslot.invalidation.fanout";
+
+    @Bean public FanoutExchange invalidationFanout() { return new FanoutExchange(INVALIDATION_FANOUT, true, false); }
+
     @Bean public DirectExchange nearslotExchange() { return new DirectExchange(EXCHANGE, true, false); }
     @Bean public DirectExchange deadLetterExchange() { return new DirectExchange(DLX, true, false); }
 

@@ -64,6 +64,26 @@ updated: 2026-09-05
 - confirm 暂停后通过 POST /agent/conversations/{id}/confirm 恢复；断线重连携带 Last-Event-ID 增量补发。
 - data: 必须可 JSON 化；事件名与 PickNear 对齐以便前端复用解析器。
 
+## 7.5 端点清单（v1，与 openapi.json 同步）
+
+| 端点 | 方法 | 用途 | 需鉴权 |
+|---|---|---|---|
+| `/api/v1/auth/code` | POST | 下发验证码（dev 回显，生产接短信网关） | ❌ |
+| `/api/v1/auth/login` | POST | 密码/验证码登录，返回 AT | ❌ |
+| `/api/v1/auth/refresh` | POST | 旧 RT 换新 AT（并发自愈） | ❌（凭 RT） |
+| `/api/v1/auth/logout` | POST | 清理四键，旧 AT 立即失效 | ✅ |
+| `/api/v1/shops/{id}` | GET | 服务商详情（缓存三防） | ❌ |
+| `/api/v1/shops/nearby` | GET | GEOSEARCH 附近检索 | ❌ |
+| `/api/v1/slots` | POST | 发布时段（落库+预热+广播失效） | ✅ |
+| `/api/v1/slots/{id}/close` | POST | 关闭时段 | ✅ |
+| `/api/v1/appointments` | POST | 抢约（Lua 三检查） | ✅ |
+| `/api/v1/appointments` | GET | 我的订单列表 | ✅ |
+| `/api/v1/appointments/{id}` | GET | 订单详情（归属校验） | ✅ |
+| `/api/v1/appointments/{id}/cancel` | POST | 取消（回补反转） | ✅ |
+| `/api/v1/appointments/{slotId}/waitlist` | POST/DELETE | 加入/退出候补 | ✅ |
+| `/api/v1/payments/callback` | POST | 支付回调（幂等） | ❌（网关签名待补） |
+| `/api/v1/internal/reconcile/run` | POST | 手动触发对账 | 🔑 X-Admin-Token |
+
 ## 8. 文档与契约
 
 - 接口定义以 springdoc(knife4j) 注解为唯一事实源，生成 openapi.json 入库；api/design.md 只承载规范不承载明细。

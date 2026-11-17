@@ -6,7 +6,6 @@ spring:
       host: localhost
       port: 46379
       password: ${REDIS_PASSWORD:}
-      # 本地验证：docker run --name nearslot-redis-verify -p 46379:6379 redis:7-alpine --requirepass $REDIS_PASSWORD
   datasource:
     # NON_KEYWORDS=USER：user 是 H2 保留字，需显式放行（生产 MySQL 无此问题）
     url: jdbc:h2:mem:nearslot;MODE=MySQL;DB_CLOSE_DELAY=-1;NON_KEYWORDS=USER
@@ -17,14 +16,28 @@ spring:
     init:
       mode: always
       schema-locations: classpath:verify-schema.sql
+  rabbitmq:
+    connection-timeout: 3s
+    listener:
+      simple:
+        missing-queues-fatal: false
 
 server:
   port: 48081
+
+# 本地验证默认不起 RabbitMQ：关闭失效广播消费者，改用本地降级 + TTL
+# （实测：MQ 缺失时 @RabbitListener 每 5s 重连刷 ERROR 日志）
+nearslot:
+  mq:
+    invalidation-enabled: false
+  admin:
+    token: ""
 
 knife4j:
   enable: true
   setting:
     language: zh_cn
+
 springdoc:
   api-docs:
     path: /v3/api-docs

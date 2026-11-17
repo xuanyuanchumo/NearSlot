@@ -62,6 +62,17 @@ updated: 2026-11-17
 | 8 | 候补仅 1 个 ZSet | hmdp-plus 三键 | **已修复**：ZSet+Set+Status Hash，提升拆出 `PromotionService` |
 | 9 | `ObjectMapper` 拆包后无 Bean | 显式注册（Boot 4 不再自动装配） | **已修复**：新增 `JacksonConfig`，开启 JavaTime + 忽略未知字段 |
 
+## 3.5 实现踩坑记录（供后续复用，避免重复付费）
+
+| 坑 | 现象 | 结论 |
+|---|---|---|
+| `@ConditionalOnProperty` 标在 `@RabbitListener` 方法上 | 启动即崩：`Expression parsing failed`（`#{queue.name}` 无法解析，因队列 Bean 已被移除） | 条件注解必须标在**类级**，同时控制队列声明与监听器 |
+| RabbitMQ 不可用时的监听器 | 每 5s 重连刷 ERROR，掩盖真实告警、浪费 CPU | 提供 `nearslot.mq.invalidation-enabled` 开关；本地开发默认关 |
+| MQ 广播失败静默吞掉 | 跨实例脏读：发布时段后其他实例仍返旧值 | `publish()` 必须返回布尔，调用方拿到 false 做**本地失效降级** |
+| YAML 多个顶级 `spring:` 键 | 启动失败（配置加载期异常，无明确报错） | 同文件只能有一个 `spring:`，子配置须合并 |
+| `BaseException` 的 403 段 | 权限异常误返 HTTP 200，监控无法告警 | `WebExceptionAdvice` 必须按码段完整映射 401/403/404/429 |
+| `updateById` 在 Mockito 中断言 | 编译报"引用不明确"（`T` 与 `Collection<T>` 双重载） | 测试里用 `ArgumentMatchers.<Entity>argThat(...)` 显式指定类型 |
+
 ## 4. 复核机制（全阶段）
 
 | 检查点 | 动作 | 执行者 |
