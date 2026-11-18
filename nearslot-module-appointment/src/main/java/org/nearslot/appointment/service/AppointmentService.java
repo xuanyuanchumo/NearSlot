@@ -82,7 +82,7 @@ public class AppointmentService {
     }
 
     /** 订单详情（FR-4.1）：校验归属防越权。 */
-    public AppointmentOrder queryOrder(Long userId, Long orderId) {
+    public org.nearslot.appointment.dto.AppointmentView queryOrder(Long userId, Long orderId) {
         AppointmentOrder o = orderMapper.selectById(orderId);
         if (o == null) throw new BaseException(BaseCode.NOT_FOUND);
         if (!o.getUserId().equals(userId)) {
@@ -93,31 +93,40 @@ public class AppointmentService {
     }
 
     /**
-     * 回填前端展示字段（评审 F-008）。
+     * 回填前端展示字段并转为视图（评审 F-008）。
      *
      * 前端 types/api.ts 的 Appointment 要求 startsAt/tzId/amountCents，
-     * 而后端实体只有 amountCent 与 slotId。这里批量从 TimeSlot 补时间字段，
-     * 并做金额双字段兼容，避免"我的预约"页时间与金额恒空。
-     * shopName/technicianName 是前端可选字段，超出本模块边界（需 common 契约），
-     * 暂不回填，登记 backlog。
+     * 而后端列是 amount_cent（实体 amountCent）。这里批量从 TimeSlot 补时间字段。
+     *
+     * **为什么是视图而不是把展示字段加进实体**：MyBatis-Plus 会把实体全部字段
+     * 当成表列生成 SQL，展示字段不在表里 -> Unknown column 500（2026-11-19 实测）。
+     * 实体必须与表结构 1:1，展示字段放 DTO。
+     * shopName/technicianName 属跨模块（shop/content），需 common 契约，暂不回填。
      */
-    private java.util.List<AppointmentOrder> enrich(java.util.List<AppointmentOrder> orders) {
-        if (orders == null || orders.isEmpty()) return orders;
+    private java.util.List<org.nearslot.appointment.dto.AppointmentView> enrich(
+            java.util.List<AppointmentOrder> orders) {
+        if (orders == null || orders.isEmpty()) return java.util.List.of();
+        java.util.Map<Long, TimeSlot> slots = new java.util.HashMap<>();
         for (AppointmentOrder o : orders) {
-            if (o.getAmountCents() == null) o.setAmountCents(o.getAmountCent());
-            if (o.getSlotId() != null) {
-                TimeSlot slot = timeSlotMapper.selectById(o.getSlotId());
-                if (slot != null) {
-                    o.setStartsAt(slot.getStartsAt());
-                    o.setTzId(slot.getTzId());
-                }
+            if (o.getSlotId() != null && !slots.containsKey(o.getSlotId())) {
+                TimeSlot s = timeSlotMapper.selectById(o.getSlotId());
+                if (s != null) slots.put(o.getSlotId(), s);
             }
         }
-        return orders;
+        return orders.stream().map(o -> {
+            TimeSlot s = o.getSlotId() == null ? null : slots.get(o.getSlotId());
+            return new org.nearslot.appointment.dto.AppointmentView(
+                o.getId(), o.getUserId(), o.getSlotId(), o.getShopId(),
+                o.getServiceStaffId(), null,
+                o.getStatus(), o.getAmountCent(), o.getAmountCent(),
+                s == null ? null : s.getStartsAt(),
+                s == null ? null : s.getTzId(),
+                o.getHoldExpiresAt(), o.getCreatedAt());
+        }).toList();
     }
 
     /** 我的订单列表（FR-4.1），按创建时间倒序。 */
-    public java.util.List<AppointmentOrder> listMyOrders(Long userId, Integer status) {
+    public java.util.List<org.nearslot.appointment.dto.AppointmentView> listMyOrders(Long userId, Integer status) {
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<AppointmentOrder>lambdaQuery()
             .eq(AppointmentOrder::getUserId, userId);
         if (status != null) q.eq(AppointmentOrder::getStatus, status);
