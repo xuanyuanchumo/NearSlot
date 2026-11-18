@@ -141,6 +141,12 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: openapi-generated
+          path: api/openapi.json
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: always()
         with: { name: app-log-contract, path: /tmp/app.log, retention-days: 3 }
 
   integration:
