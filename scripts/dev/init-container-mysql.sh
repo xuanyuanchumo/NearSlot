@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 cd "D:/Projects/TraeProjects/Studying/NearSlot" || exit 9
 echo "=== 容器内建库建表 ==="
-docker exec -i nearslot-mysql-test mysql -uroot -prootdev123 < sql/2_business.sql 2>&1 | head -3
+docker exec -i nearslot-mysql-test mysql -uroot -prootdev123 < sql/02_business.sql 2>&1 | head -3
 echo "=== 表数量 ==="
 docker exec nearslot-mysql-test mysql -uroot -prootdev123 -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='nearslot';" 2>&1 | head -2
 echo "=== 种子数据 ==="

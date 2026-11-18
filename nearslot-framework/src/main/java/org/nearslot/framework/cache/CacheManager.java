@@ -25,23 +25,24 @@ import java.util.function.Function;
  */
 public class CacheManager {
 
-    private static final long L1_TTL_MINUTES = 20L;
-    /** 击穿互斥锁：跨实例单飞，TTL 远小于缓存 TTL，锁丢失不致雪崩。 */
-    private static final long REBUILD_LOCK_TTL_SECONDS = 5L;
-    /** 未抢到锁时等待并重读 L2 的时长（毫秒），超时即自行回源，避免用户端长时间阻塞。 */
-    private static final long REBUILD_WAIT_MILLIS = 50L;
-
     /** JSON 编解码器：由 Spring 容器注入（成熟库优先，禁止手 new）。 */
     private final ObjectMapper mapper;
 
     private final StringRedisTemplate redis;
 
-    private final Cache<String, String> l1 =
-        Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(L1_TTL_MINUTES)).build();
+    /** 基础设施调优参数：L1 TTL / 重建锁 TTL / 等待时长（`nearslot.framework.cache-*`）。 */
+    private final org.nearslot.framework.config.properties.FrameworkProperties props;
 
-    public CacheManager(StringRedisTemplate redis, ObjectMapper mapper) {
+    private final Cache<String, String> l1;
+
+    public CacheManager(StringRedisTemplate redis, ObjectMapper mapper,
+                        org.nearslot.framework.config.properties.FrameworkProperties props) {
         this.redis = redis;
         this.mapper = mapper;
+        this.props = props;
+        // L1 TTL 来自配置：多实例缩短 L1 可降低陈旧窗口，本地调试则可加长减少回源
+        this.l1 = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(props.getCacheL1TtlMinutes())).build();
     }
 
     /**
@@ -65,7 +66,7 @@ public class CacheManager {
     private <T> T loadSingleFlight(String key, Class<T> type, Function<String, T> loader, long ttlSeconds) {
         String lockKey = key + ":rebuild";
         Boolean acquired = redis.opsForValue()
-            .setIfAbsent(lockKey, "1", REBUILD_LOCK_TTL_SECONDS, TimeUnit.SECONDS);
+            .setIfAbsent(lockKey, "1", props.getCacheRebuildLockSeconds(), TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(acquired)) {
             // 别的实例正在回源：短暂等待后重读，读不到就自己回源（不阻塞用户）
             sleepQuietly();
@@ -106,7 +107,7 @@ public class CacheManager {
 
     private void sleepQuietly() {
         try {
-            Thread.sleep(REBUILD_WAIT_MILLIS);
+            Thread.sleep(props.getCacheRebuildWaitMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

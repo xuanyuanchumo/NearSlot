@@ -49,7 +49,7 @@ class HoldTimeoutTaskTest {
         delayQueue = mock(RedissonDelayQueue.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
         task = new HoldTimeoutTask(orderMapper, timeSlotMapper, luaService, delayQueue,
-            eventPublisher);
+            eventPublisher, new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     private AppointmentOrder order(long id, int status, long slotId) {

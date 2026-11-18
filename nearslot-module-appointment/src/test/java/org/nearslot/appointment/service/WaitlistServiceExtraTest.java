@@ -48,7 +48,7 @@ class WaitlistServiceExtraTest {
         TimeSlot s = new TimeSlot();
         s.setId(1L); s.setMinLevel(0);
         when(slotMapper.selectById(anyLong())).thenReturn(s);
-        service = new WaitlistService(redis, slotMapper, levelQuery);
+        service = new WaitlistService(redis, new org.nearslot.appointment.config.AppointmentProperties(), slotMapper, levelQuery);
     }
 
     @Test

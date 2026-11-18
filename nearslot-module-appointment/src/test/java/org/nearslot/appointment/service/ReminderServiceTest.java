@@ -42,7 +42,7 @@ class ReminderServiceTest {
         zsetOps = mock(ZSetOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
         when(redis.opsForZSet()).thenReturn(zsetOps);
-        service = new ReminderService(slotMapper, delayQueue, redis);
+        service = new ReminderService(slotMapper, delayQueue, redis, new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     private TimeSlot slot(LocalDateTime start) {

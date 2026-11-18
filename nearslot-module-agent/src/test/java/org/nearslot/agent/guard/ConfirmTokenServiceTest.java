@@ -25,7 +25,7 @@ class ConfirmTokenServiceTest {
         redis = mock(StringRedisTemplate.class);
         valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
-        service = new ConfirmTokenService(redis);
+        service = new ConfirmTokenService(redis, new org.nearslot.agent.config.AgentProperties());
     }
 
     @Test

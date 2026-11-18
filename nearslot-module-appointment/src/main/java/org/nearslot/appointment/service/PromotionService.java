@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class PromotionService {
 
-    private static final long TTL_SECONDS = 86400L;
+    /** 订阅状态 TTL 由 `nearslot.appointment.subscription-ttl-seconds` 决定。 */
 
     private final StringRedisTemplate redis;
     private final DistributedLockTemplate lockTemplate;
@@ -107,7 +107,7 @@ public class PromotionService {
                 redis.opsForZSet().remove(zsetKey, userId);
                 redis.opsForSet().remove(setKey, userId);
                 redis.opsForHash().put(statusKey, userId, String.valueOf(WaitlistService.STATUS_SUCCESS));
-                redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+                redis.expire(statusKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
                 log.info("候补提升成功并已建单 slotId={} userId={} orderId={}", slotId, userId, orderId);
                 return uid;
             } catch (BaseException e) {

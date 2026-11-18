@@ -50,7 +50,7 @@ public class HoldTimeoutTask {
     /** 延迟队列名。 */
     public static final String HOLD_QUEUE = "nearslot:delay:hold";
     /** 兜底扫描间隔（低频，避免与业务争抢 DB）。 */
-    private static final long SCAN_INTERVAL_MS = 60_000L;
+    /** 扫描周期由 `nearslot.appointment.hold-scan-interval-ms` 决定。 */
 
     private final AppointmentOrderMapper orderMapper;
     private final TimeSlotMapper timeSlotMapper;
@@ -63,6 +63,8 @@ public class HoldTimeoutTask {
      * 内核又依赖本类投递 Hold 消息，直接互相注入会形成循环依赖导致启动失败。
      */
     private final ApplicationEventPublisher eventPublisher;
+    /** 扫描周期等策略外置到 `nearslot.appointment.*`（调度本身用 fixedDelayString 引用同一键）。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /** 下单成功后调用：投递延迟消息（主路径）。 */
     public void scheduleExpire(AppointmentOrder order, long holdSeconds) {
@@ -88,7 +90,7 @@ public class HoldTimeoutTask {
     }
 
     /** 兜底扫描（幂等补偿，见类注释）。 */
-    @Scheduled(fixedDelay = SCAN_INTERVAL_MS)
+    @Scheduled(fixedDelayString = "${nearslot.appointment.hold-scan-interval-ms:60000}")
     public void scanExpiredHolds() {
         List<AppointmentOrder> expired = orderMapper.selectList(
             com.baomidou.mybatisplus.core.toolkit.Wrappers.<AppointmentOrder>lambdaQuery()

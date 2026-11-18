@@ -34,15 +34,17 @@ import java.util.concurrent.TimeUnit;
 public class ReminderService {
 
     /** 提前量：2 分钟。 */
-    public static final long AHEAD_SECONDS = 120L;
+    /** 提前量与去重窗口由 `nearslot.appointment.reminder-*` 决定。 */
     /** 去重窗口：300s（research/02 对齐 hmdp-plus dedup.window.seconds=300）。 */
-    public static final long DEDUP_WINDOW_SECONDS = 300L;
+
     /** 延迟队列名。 */
     public static final String REMINDER_QUEUE = "nearslot:delay:reminder";
 
     private final TimeSlotMapper timeSlotMapper;
     private final RedissonDelayQueue delayQueue;
     private final StringRedisTemplate redis;
+    /** 提前量与去重窗口外置到 `nearslot.appointment.reminder-*`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /** 时段发布后调用：为此时段安排开抢提醒。 */
     public void scheduleForSlot(Long slotId) {
@@ -52,7 +54,7 @@ public class ReminderService {
         long startEpoch = slot.getStartsAt()
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         long now = System.currentTimeMillis();
-        long delaySeconds = (startEpoch - now) / 1000 - AHEAD_SECONDS;
+        long delaySeconds = (startEpoch - now) / 1000 - props.getReminderAheadSeconds();
 
         if (delaySeconds <= 0) {
             // 已不足 2 分钟（或已过开始时间）：立即触发一次，避免完全收不到
@@ -60,7 +62,7 @@ public class ReminderService {
             fireReminder(slotId);
         } else {
             delayQueue.offer(REMINDER_QUEUE, String.valueOf(slotId), delaySeconds);
-            log.info("开抢提醒已排期 slotId={} delay={}s（提前 {}s）", slotId, delaySeconds, AHEAD_SECONDS);
+            log.info("开抢提醒已排期 slotId={} delay={}s（提前 {}s）", slotId, delaySeconds, props.getReminderAheadSeconds());
         }
     }
 
@@ -94,13 +96,13 @@ public class ReminderService {
         for (String userId : candidates) {
             String dedupKey = RedisConstants.PREFIX + "reminder:dedup:" + slotId + ":" + userId;
             Boolean first = redis.opsForValue()
-                .setIfAbsent(dedupKey, "1", DEDUP_WINDOW_SECONDS, TimeUnit.SECONDS);
+                .setIfAbsent(dedupKey, "1", props.getReminderDedupWindowSeconds(), TimeUnit.SECONDS);
             if (Boolean.TRUE.equals(first)) {
                 // TODO(Phase 3+)：接入短信/APP 推送网关
                 log.info("【开抢提醒】slotId={} userId={}（2 分钟后开始）", slotId, userId);
                 sent++;
             }
         }
-        log.info("开抢提醒完成 slotId={} 共发送 {} 人（去重窗口 {}s）", slotId, sent, DEDUP_WINDOW_SECONDS);
+        log.info("开抢提醒完成 slotId={} 共发送 {} 人（去重窗口 {}s）", slotId, sent, props.getReminderDedupWindowSeconds());
     }
 }

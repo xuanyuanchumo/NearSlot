@@ -36,19 +36,72 @@ public class ShopService {
 
     private static final String GEO_KEY = "nearslot:geo:shop";
 
-    /** GEOSEARCH 包装：返回按距离升序的 member 列表。 */
-    private static final DefaultRedisScript<List> GEO_SEARCH = buildGeoScript();
+    /**
+     * GEO 半径检索脚本（返回按距离升序的 member）。
+     *
+     * **为什么要两套脚本（2026-11-18 运行时缺陷修复）**：
+     * `GEOSEARCH` 是 Redis **6.2** 才引入的命令，本项目的验证环境是 Redis 3.0.5，
+     * 直接调用会报 "Unknown Redis command called from Lua script"，
+     * 表现为附近检索恒 500 —— 而单测用 mock 完全发现不了。
+     *
+     * 因此启动时探测服务端版本，>=6.2 用 GEOSEARCH，否则回退到长期存在的
+     * `GEORADIUS ... WITHDIST ASC COUNT`（6.2 起标记废弃但 3.x~7.x 均可用）。
+     * 相比"假定版本"，能力探测能让同一份产物跑在本地与生产两套 Redis 上。
+     */
+    private static final DefaultRedisScript<List> GEO_SEARCH = buildGeoScript(
+        "local r = redis.call('GEOSEARCH', KEYS[1], 'FROMLONLAT', ARGV[1], ARGV[2], "
+      + "'BYRADIUS', ARGV[3], 'km', 'ASC', 'COUNT', ARGV[4]) "
+      + "local out = {} "
+      + "for i = 1, #r, 2 do out[#out + 1] = r[i] end "
+      + "return out");
 
-    private static DefaultRedisScript<List> buildGeoScript() {
+    /** 旧版 Redis（<6.2）回退脚本。 */
+    private static final DefaultRedisScript<List> GEO_RADIUS = buildGeoScript(
+        "local r = redis.call('GEORADIUS', KEYS[1], ARGV[1], ARGV[2], ARGV[3], 'km', "
+      + "'WITHDIST', 'ASC', 'COUNT', ARGV[4]) "
+      + "local out = {} "
+      + "for i = 1, #r do out[#out + 1] = r[i][1] end "
+      + "return out");
+
+    /** 服务端是否支持 GEOSEARCH（>=6.2）；null = 尚未探测。 */
+    private volatile Boolean supportsGeoSearch;
+
+    private static DefaultRedisScript<List> buildGeoScript(String text) {
         DefaultRedisScript<List> s = new DefaultRedisScript<>();
-        s.setScriptText(
-            "local r = redis.call('GEOSEARCH', KEYS[1], 'FROMLONLAT', ARGV[1], ARGV[2], "
-          + "'BYRADIUS', ARGV[3], 'km', 'ASC', 'COUNT', ARGV[4]) "
-          + "local out = {} "
-          + "for i = 1, #r, 2 do out[#out + 1] = r[i] end "
-          + "return out");
+        s.setScriptText(text);
         s.setResultType(List.class);
         return s;
+    }
+
+    /**
+     * 探测服务端版本（只探测一次，之后走内存标记）。
+     *
+     * 探测失败按"不支持"处理（回退到 GEORADIUS，覆盖面更广），
+     * 而不是抛出异常让附近检索整体不可用。
+     */
+    private boolean geoSearchSupported() {
+        Boolean cached = supportsGeoSearch;
+        if (cached != null) return cached;
+        boolean supported = false;
+        try {
+            // RedisServerCommands#info 返回 java.util.Properties，直接取版本键，避免手解析文本
+            java.util.Properties info = redis.execute(
+                (org.springframework.data.redis.core.RedisCallback<java.util.Properties>) c ->
+                    c.serverCommands().info("server"));
+            String version = info == null ? "" : info.getProperty("redis_version", "");
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("([0-9]+)\\.([0-9]+)").matcher(version);
+            if (m.find()) {
+                int major = Integer.parseInt(m.group(1));
+                int minor = Integer.parseInt(m.group(2));
+                supported = major > 6 || (major == 6 && minor >= 2);
+            }
+        } catch (RuntimeException e) {
+            log.warn("GEO 能力探测失败，回退 GEORADIUS", e);
+        }
+        log.info("GEO 命令选择：{}", supported ? "GEOSEARCH(>=6.2)" : "GEORADIUS(兼容旧版)");
+        supportsGeoSearch = supported;
+        return supported;
     }
 
     /**
@@ -110,13 +163,15 @@ public class ShopService {
                 .eq(org.nearslot.shop.entity.Technician::getShopId, shopId));
     }
 
-    /** 附近服务商：GEOSEARCH 半径 + 距离升序（FR-2.3）。 */
+    /** 附近服务商：GEO 半径 + 距离升序（FR-2.3，按服务端能力自动选命令）。 */
     @SuppressWarnings("unchecked")
     public List<Shop> searchNearby(double x, double y, double kmOrNull) {
         // 半径缺省与返回条数上限外置：到店 5km 够，上门可能要 20km。
         double km = kmOrNull > 0 ? kmOrNull : props.getNearbyRadiusKm();
-        List<Object> members = redis.execute(GEO_SEARCH, List.of(GEO_KEY),
-            String.valueOf(x), String.valueOf(y), String.valueOf(km), "20");
+        DefaultRedisScript<List> script = geoSearchSupported() ? GEO_SEARCH : GEO_RADIUS;
+        List<Object> members = redis.execute(script, List.of(GEO_KEY),
+            String.valueOf(x), String.valueOf(y), String.valueOf(km),
+            String.valueOf(props.getNearbyMaxResults()));
         if (members == null || members.isEmpty()) return List.of();
         List<Shop> shops = new ArrayList<>();
         for (Object m : members) {

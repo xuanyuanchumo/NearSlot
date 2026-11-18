@@ -91,7 +91,7 @@ class PromotionLevelFilterTest {
     @DisplayName("等级不足 -> join 抛 LEVEL_NOT_MET，不写队列")
     void joinRejectsLowLevel() {
         when(slotMapper.selectById(SLOT_ID)).thenReturn(slot(8));
-        waitlist = new WaitlistService(redis, slotMapper, uid -> 5);
+        waitlist = new WaitlistService(redis, new org.nearslot.appointment.config.AppointmentProperties(), slotMapper, uid -> 5);
 
         BaseException e = assertThrows(BaseException.class, () -> waitlist.join(SLOT_ID, 1001L));
 
@@ -106,7 +106,7 @@ class PromotionLevelFilterTest {
         when(setOps.add(anyString(), anyString())).thenReturn(1L);
         when(hashOps.get(anyString(), any())).thenReturn(null);
         when(zsetOps.rank(anyString(), anyString())).thenReturn(0L);
-        waitlist = new WaitlistService(redis, slotMapper, uid -> 5);
+        waitlist = new WaitlistService(redis, new org.nearslot.appointment.config.AppointmentProperties(), slotMapper, uid -> 5);
 
         assertTrue(waitlist.join(SLOT_ID, 1001L) > 0);
         verify(zsetOps).add(eq(RedisConstants.SUBSCRIBE_ZSET + SLOT_ID), eq("1001"), anyDouble());

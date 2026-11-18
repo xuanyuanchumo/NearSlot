@@ -28,16 +28,18 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class TechRankService {
 
-    private static final long TTL_DAYS = 90L;
+    /** 榜单 TTL 由 `nearslot.appointment.tech-rank-ttl-days` 决定。 */
 
     private final StringRedisTemplate redis;
+    /** 榜单 TTL 外置到 `nearslot.appointment.tech-rank-ttl-days`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /** 支付成功后调用：为技师增加 1 次有效成交。 */
     public void recordDeal(Long shopId, Long technicianId, LocalDate date) {
         if (shopId == null || technicianId == null || date == null) return;
         String key = rankKey(shopId, date);
         redis.opsForZSet().incrementScore(key, String.valueOf(technicianId), 1.0);
-        redis.expire(key, TTL_DAYS, TimeUnit.DAYS);
+        redis.expire(key, props.getTechRankTtlDays(), TimeUnit.DAYS);
         log.debug("技师榜 +1 shopId={} techId={} date={}", shopId, technicianId, date);
     }
 

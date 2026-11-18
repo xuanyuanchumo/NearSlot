@@ -28,12 +28,13 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class TokenService {
     /** AT 有效期 30min；RT 7d。 */
-    public static final long AT_TTL_SECONDS = 30 * 60L;
-    public static final long RT_TTL_SECONDS = 7L * 24 * 3600;
+    /** AT/RT 有效期外置到 `nearslot.auth.access-ttl-seconds / refresh-ttl-seconds`（ADR-002 基准值）。 */
 
     private final StringRedisTemplate redis;
     private final SecretKey jwtKey;
     private final org.nearslot.auth.mapper.UserRoleMapper userRoleMapper;
+    /** 认证与风控参数（Token TTL 等）外置到 `nearslot.auth.*`。 */
+    private final org.nearslot.auth.config.AuthProperties props;
 
     private DefaultRedisScript<Long> script(String text) {
         DefaultRedisScript<Long> s = new DefaultRedisScript<>();
@@ -59,7 +60,7 @@ public class TokenService {
                     RedisConstants.TOKEN_REFRESH + userId,
                     RedisConstants.TOKEN_VERSION_VALID + userId,
                     RedisConstants.TOKEN_VERSION_CURRENT + userId),
-            at, rt, v, String.valueOf(RT_TTL_SECONDS));
+            at, rt, v, String.valueOf(props.getRefreshTtlSeconds()));
         return new TokenPair(at, rt);
     }
 
@@ -88,7 +89,7 @@ public class TokenService {
             .claim("role", role);
         if (shopId != null) b.claim("shopId", shopId);
         return b.issuedAt(new Date())
-            .expiration(new Date(System.currentTimeMillis() + AT_TTL_SECONDS * 1000))
+            .expiration(new Date(System.currentTimeMillis() + props.getAccessTtlSeconds() * 1000))
             .signWith(jwtKey)
             .compact();
     }
@@ -198,8 +199,8 @@ public class TokenService {
         String version = redis.opsForValue().get(RedisConstants.TOKEN_VERSION_VALID + userId);
         long v = version == null ? 1L : Long.parseLong(version);
         String newAt = buildAccessToken(userId, v);
-        redis.opsForValue().set(atKey, newAt, AT_TTL_SECONDS, TimeUnit.SECONDS);
-        redis.opsForValue().set(curKey, newAt, RT_TTL_SECONDS, TimeUnit.SECONDS);
+        redis.opsForValue().set(atKey, newAt, props.getAccessTtlSeconds(), TimeUnit.SECONDS);
+        redis.opsForValue().set(curKey, newAt, props.getRefreshTtlSeconds(), TimeUnit.SECONDS);
         return newAt;
     }
 

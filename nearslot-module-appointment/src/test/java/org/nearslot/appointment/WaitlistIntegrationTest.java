@@ -61,7 +61,7 @@ class WaitlistIntegrationTest {
 
         UserLevelQuery levelQuery = uid -> 10;   // 集成测试默认满级，聚焦队列语义
 
-        waitlist = new WaitlistService(redis, slotMapper, levelQuery);
+        waitlist = new WaitlistService(redis, new org.nearslot.appointment.config.AppointmentProperties(), slotMapper, levelQuery);
         // 提升会被真实调用（不再只改 Redis）：给出可工作的插桩，避免集成测试因缺 Bean 失败
         SlotBookingCore bookingCore = org.mockito.Mockito.mock(SlotBookingCore.class);
         org.mockito.Mockito.when(bookingCore.book(org.mockito.ArgumentMatchers.anyLong(),

@@ -63,9 +63,38 @@ logging:
 # 这些是命名规范与跨服务协议，可配置化只会增加排查成本。
 # ============================================================================
 nearslot:
+  auth:
+    # Token 有效期（ADR-002 基准值；被攻击时可临时收紧）
+    access-ttl-seconds: 1800
+    refresh-ttl-seconds: 604800
+    # 账号维度失败计数与锁定
+    fail-count-ttl-seconds: 86400
+    max-fail-count: 10
+    login-lock-ttl-seconds: 1800
+    # IP 维度滑动窗口
+    fail-ip-ttl-seconds: 60
+    max-fail-ip: 5
+    login-code-ttl-seconds: 300
+    # JWT 密钥最小字节数（低于此值拒绝启动）
+    min-secret-bytes: 32
+  agent:
+    # 高危操作确认令牌有效期（秒）
+    confirm-token-ttl-seconds: 300
+    # 两阶段规划最大工具轮数（防 token 成本失控）
+    max-tool-rounds: 5
   appointment:
     # Hold 窗口（分钟）：必须大于支付 P99，过长会降低时段翻台率
     hold-minutes: 10
+    # 超时扫描与对账周期（毫秒）
+    hold-scan-interval-ms: 60000
+    reconcile-interval-ms: 300000
+    reconcile-in-flight-window-ms: 12000
+    # 开抢提醒：提前量与去重窗口（秒）
+    reminder-ahead-seconds: 120
+    reminder-dedup-window-seconds: 300
+    # 候选/订阅状态 TTL（秒）与技师榜 TTL（天）
+    subscription-ttl-seconds: 86400
+    tech-rank-ttl-days: 90
     # 单次候补提升最多跳过多少个不合格候选（防死循环）
     max-promotion-skip: 20
     # 「我的预约」列表返回上限
@@ -129,6 +158,7 @@ nearslot:
     # MQ 消费：最大重试与投递延迟门（毫秒）
     mq-max-retry: 3
     mq-message-delay-ms: 10000
-    # 缓存重建互斥：锁 TTL 与等待重读时长
+    # 缓存：L1 TTL、重建互斥锁 TTL、等待重读时长
+    cache-l1-ttl-minutes: 20
     cache-rebuild-lock-seconds: 5
     cache-rebuild-wait-millis: 50
