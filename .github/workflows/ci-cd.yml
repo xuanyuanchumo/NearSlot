@@ -25,7 +25,9 @@ env:
   MYSQL_PASSWORD: ci-mysql-pass
   MYSQL_DATABASE: nearslot
   REDIS_HOST: 127.0.0.1
-  REDIS_PASSWORD: ci-redis-pass
+  # CI 的 redis 服务容器无法传启动参数（services 不支持 command 键），故不设密码。
+  # 本地/生产仍按 .env 配置密码；验证"需鉴权的 Redis 行为"请在本地 E2E 做（已有 verify_*.sh）。
+  REDIS_PASSWORD: ""
   RABBITMQ_HOST: 127.0.0.1
   RABBITMQ_USER: nearslot
   RABBITMQ_PASSWORD: ci-rabbit-pass
@@ -92,10 +94,9 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 20
       redis:
         image: redis:7-alpine
-        command: ["redis-server", "--requirepass", "ci-redis-pass"]
         ports: ["46379:6379"]
         options: >-
-          --health-cmd "redis-cli -a ci-redis-pass ping"
+          --health-cmd "redis-cli ping"
           --health-interval 10s --health-timeout 5s --health-retries 20
       rabbitmq:
         image: rabbitmq:3.13-alpine
@@ -113,7 +114,7 @@ jobs:
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库（应用启动需要表结构）
         run: |
-          for f in $(ls sql/*.sql | sort); do
+          for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
             echo "apply $f"
             mysql -h127.0.0.1 -P43306 -unearslot -pci-mysql-pass nearslot < "$f"
           done
@@ -122,10 +123,8 @@ jobs:
           mvn -B -q -DskipTests package
           java -jar nearslot-app/target/nearslot-app-*.jar \
             --spring.profiles.active=verify > /tmp/app.log 2>&1 &
-          for i in $(seq 1 90); do
-            if curl -sf http://localhost:8081/v3/api-docs -o /tmp/openapi.json; then break; fi
-            sleep 2
-          done
+          # 有界等待：最多 180s，避免 CI 卡死；失败时下方打印应用日志
+          timeout 180 bash -c 'until curl -sf http://localhost:8081/v3/api-docs -o /tmp/openapi.json; do sleep 2; done' || true
           if [ ! -s /tmp/openapi.json ]; then echo "::error::应用未启动，无法生成契约"; tail -50 /tmp/app.log; exit 1; fi
           mkdir -p api
           python3 -c "import json;d=json.load(open('/tmp/openapi.json'));json.dump(d,open('api/openapi.json','w'),ensure_ascii=False,indent=2,sort_keys=True)"
@@ -184,10 +183,9 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 20
       redis:
         image: redis:7-alpine
-        command: ["redis-server", "--requirepass", "ci-redis-pass"]
         ports: ["46379:6379"]
         options: >-
-          --health-cmd "redis-cli -a ci-redis-pass ping"
+          --health-cmd "redis-cli ping"
           --health-interval 10s --health-timeout 5s --health-retries 20
       rabbitmq:
         image: rabbitmq:3.13-alpine
@@ -204,7 +202,7 @@ jobs:
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库
         run: |
-          for f in $(ls sql/*.sql | sort); do
+          for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
             echo "apply $f"; mysql -h127.0.0.1 -P43306 -unearslot -pci-mysql-pass nearslot < "$f"
           done
       - name: 集成测试（真实 MySQL/Redis/RabbitMQ）
