@@ -2,7 +2,7 @@
   "name": "nearslot-web",
   "version": "0.1.0",
   "private": true,
-  "description": "NearSlot 时段预约系统前端（Vue3 + TypeScript 6 + Vite+ 统一工具链 + Element Plus）",
+  "description": "NearSlot 通用本地生活服务预约平台前端（Vue3 + TypeScript 6 + Vite+ 统一工具链 + Element Plus）",
   "type": "module",
   "scripts": {
     "dev": "vp dev",

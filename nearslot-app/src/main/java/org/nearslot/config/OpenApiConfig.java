@@ -19,7 +19,7 @@ public class OpenApiConfig {
     public OpenAPI nearSlotOpenApi() {
         return new OpenAPI()
             .info(new Info()
-                .title("NearSlot 预约系统 API")
+                .title("NearSlot 通用本地生活服务预约平台 API")
                 .description("时段预约（抢约/Hold/候补/对账）与 AI 助手接口。统一响应 {code,message,data,timestamp}；"
                     + "业务错误码见 BaseCode（501xx 业务 / 100xx Lua / 401xx 认证）。")
                 .version("v1")

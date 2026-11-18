@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
     <header class="ns-header">
       <div>
         <h1 class="ns-title">附近服务商</h1>
-        <p class="ns-text-muted">按时段预约技师上门服务</p>
+        <p class="ns-text-muted">按服务项预约时段，服务者与履约方式由店铺配置（到店 / 上门）</p>
       </div>
       <div class="ns-row">
         <el-button text @click="router.push('/appointments')">
