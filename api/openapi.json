@@ -1,1 +1,4107 @@
-{"openapi":"3.1.0","info":{"title":"NearSlot 预约系统 API","description":"时段预约（抢约/Hold/候补/对账）与 AI 助手接口。统一响应 {code,message,data,timestamp}；业务错误码见 BaseCode（501xx 业务 / 100xx Lua / 401xx 认证）。","contact":{"name":"NearSlot"},"license":{"name":"Apache-2.0"},"version":"v1"},"servers":[{"url":"http://localhost:48081","description":"Generated server url"}],"tags":[{"name":"预约","description":"抢约 / Hold / 取消（FR-3）"},{"name":"服务商","description":"服务商详情 / 附近检索（FR-2）"},{"name":"认证","description":"登录 / 登出（FR-1）"}],"paths":{"/api/v1/auth/login":{"post":{"tags":["认证"],"summary":"登录","description":"手机号+密码登录，返回 AT；RT 由服务端写入 HttpOnly Cookie","operationId":"AuthController_login","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/LoginRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ResultLoginResponse"}}}}}}},"/api/v1/appointments":{"post":{"tags":["预约"],"summary":"抢约","description":"Lua 三重检查（余量/一人一时段/技师时间轴）原子预扣，成功返回 orderId 并进入 Hold 待支付","operationId":"AppointmentController_book","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/BookRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ResultLong"}}}}},"security":[{"bearerAuth":[]}]}},"/api/v1/appointments/{id}/cancel":{"post":{"tags":["预约"],"summary":"取消预约","description":"状态机校验后回补 Redis（反转 beforeQty/afterQty，ADR-005）并异步触发候补提升","operationId":"AppointmentController_cancel","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ResultVoid"}}}}},"security":[{"bearerAuth":[]}]}},"/api/v1/shops/{id}":{"get":{"tags":["服务商"],"summary":"服务商详情","description":"缓存三防（布隆防穿透 + 空值缓存 + TTL Jitter）","operationId":"ShopController_detail","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ResultShop"}}}}}}},"/api/v1/shops/nearby":{"get":{"tags":["服务商"],"summary":"附近服务商","description":"GEOSEARCH 半径检索，按距离升序返回前 20 条","operationId":"ShopController_nearby","parameters":[{"name":"x","in":"query","required":true,"schema":{"type":"number","format":"double"}},{"name":"y","in":"query","required":true,"schema":{"type":"number","format":"double"}},{"name":"km","in":"query","required":false,"schema":{"type":"number","format":"double","default":5.0}}],"responses":{"200":{"description":"OK","content":{"*/*":{"schema":{"$ref":"#/components/schemas/ResultListShop"}}}}}}}},"components":{"schemas":{"LoginRequest":{"type":"object","description":"登录请求","properties":{"phone":{"type":"string","description":"手机号","example":"13800138000","minLength":1},"password":{"type":"string","description":"密码（密码登录时必填）"},"code":{"type":"string","description":"验证码（验证码登录时必填）"},"type":{"type":"string","description":"登录类型：password / code","example":"password"}},"required":["phone"]},"LoginResponse":{"type":"object","description":"登录响应","properties":{"accessToken":{"type":"string","description":"访问令牌（30min）"},"userId":{"type":"string","description":"用户 ID（字符串，防精度丢失 ADR-012）"},"level":{"type":"integer","format":"int32","description":"会员等级，决定预约门槛"}}},"ResultLoginResponse":{"type":"object","properties":{"code":{"type":"integer","format":"int32"},"message":{"type":"string"},"data":{"$ref":"#/components/schemas/LoginResponse"},"timestamp":{"type":"integer","format":"int64"}}},"BookRequest":{"type":"object","properties":{"slotId":{"type":"integer","format":"int64"}},"required":["slotId"]},"ResultLong":{"type":"object","properties":{"code":{"type":"integer","format":"int32"},"message":{"type":"string"},"data":{"type":"integer","format":"int64"},"timestamp":{"type":"integer","format":"int64"}}},"ResultVoid":{"type":"object","properties":{"code":{"type":"integer","format":"int32"},"message":{"type":"string"},"data":{},"timestamp":{"type":"integer","format":"int64"}}},"ResultShop":{"type":"object","properties":{"code":{"type":"integer","format":"int32"},"message":{"type":"string"},"data":{"$ref":"#/components/schemas/Shop"},"timestamp":{"type":"integer","format":"int64"}}},"Shop":{"type":"object","properties":{"id":{"type":"integer","format":"int64"},"name":{"type":"string"},"typeId":{"type":"integer","format":"int64"},"x":{"type":"number","format":"double"},"y":{"type":"number","format":"double"},"address":{"type":"string"}}},"ResultListShop":{"type":"object","properties":{"code":{"type":"integer","format":"int32"},"message":{"type":"string"},"data":{"type":"array","items":{"$ref":"#/components/schemas/Shop"}},"timestamp":{"type":"integer","format":"int64"}}}},"securitySchemes":{"bearerAuth":{"type":"http","description":"请求头 authorization: Bearer <AT>（小写头名；AT 为空时不发送）","scheme":"bearer","bearerFormat":"JWT"}}},"x-openapi":{"x-setting":{"customCode":200,"language":"zh-CN","enableSwaggerModels":true,"swaggerModelName":"Swagger Models","enableReloadCacheParameter":false,"enableAfterScript":true,"enableDocumentManage":true,"enableVersion":false,"enableRequestCache":true,"enableFilterMultipartApis":false,"enableFilterMultipartApiMethodType":"POST","enableHost":false,"enableHostText":"","enableDynamicParameter":false,"enableDebug":true,"enableFooter":true,"enableFooterCustom":false,"enableSearch":true,"enableOpenApi":true,"enableHomeCustom":false,"enableGroup":true,"enableResponseCode":true},"x-markdownFiles":[]}}
+{
+  "components": {
+    "schemas": {
+      "AppointmentOrder": {
+        "properties": {
+          "amountCent": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "amountCents": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fulfillmentMode": {
+            "type": "string"
+          },
+          "holdExpiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reconcileStatus": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "serviceStaffId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "shopId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "shopName": {
+            "type": "string"
+          },
+          "slotId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "technicianName": {
+            "type": "string"
+          },
+          "tzId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "userId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AppointmentVoucher": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "orderId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "redeemedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "redeemedBy": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "shopId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slotId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "userId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "BindSkillRequest": {
+        "description": "绑定技师技能请求",
+        "properties": {
+          "proficiency": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "serviceItemId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "serviceItemId"
+        ],
+        "type": "object"
+      },
+      "BlogComment": {
+        "properties": {
+          "blogId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "userId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "BookRequest": {
+        "properties": {
+          "slotId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slotId"
+        ],
+        "type": "object"
+      },
+      "ChangePasswordRequest": {
+        "description": "修改密码请求",
+        "properties": {
+          "newPassword": {
+            "description": "新密码，至少 8 位",
+            "maxLength": 64,
+            "minLength": 8,
+            "type": "string"
+          },
+          "oldPassword": {
+            "description": "原密码",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "newPassword",
+          "oldPassword"
+        ],
+        "type": "object"
+      },
+      "CommentRequest": {
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "parentId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "CreateRequest": {
+        "properties": {
+          "anonymous": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string"
+          },
+          "images": {
+            "type": "string"
+          },
+          "orderId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating": {
+            "format": "int32",
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orderId",
+          "rating"
+        ],
+        "type": "object"
+      },
+      "LoginRequest": {
+        "description": "登录请求",
+        "properties": {
+          "code": {
+            "description": "验证码（验证码登录时必填）",
+            "type": "string"
+          },
+          "password": {
+            "description": "密码（密码登录时必填）",
+            "type": "string"
+          },
+          "phone": {
+            "description": "手机号",
+            "example": "13800138000",
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "description": "登录类型：password / code",
+            "example": "password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
+        ],
+        "type": "object"
+      },
+      "LoginResponse": {
+        "description": "登录响应",
+        "properties": {
+          "accessToken": {
+            "description": "访问令牌（30min）",
+            "type": "string"
+          },
+          "level": {
+            "description": "会员等级，决定预约门槛",
+            "format": "int32",
+            "type": "integer"
+          },
+          "userId": {
+            "description": "用户 ID（字符串，防精度丢失 ADR-012）",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultAppointmentVoucher": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AppointmentVoucher"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultBlogComment": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BlogComment"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultMapStringObject": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultPointsLog": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PointsLog"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultServiceItem": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceItem"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultShop": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Shop"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PageResultTechnician": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Technician"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pages": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PayCallbackRequest": {
+        "properties": {
+          "orderId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "payNo": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "orderId",
+          "payNo"
+        ],
+        "type": "object"
+      },
+      "PointsLog": {
+        "properties": {
+          "balanceAfter": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "bizId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "changeAmount": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remark": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "userId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PublishRequest": {
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "images": {
+            "type": "string"
+          },
+          "orderId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "orderId"
+        ],
+        "type": "object"
+      },
+      "PublishSlotRequest": {
+        "properties": {
+          "capacity": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "endsAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "minLevel": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "serviceItemId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "serviceStaffId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "shopId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capacity",
+          "endsAt",
+          "serviceStaffId",
+          "shopId",
+          "startsAt"
+        ],
+        "type": "object"
+      },
+      "RedeemRequest": {
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "RefreshResponse": {
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReplyRequest": {
+        "properties": {
+          "reply": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reply"
+        ],
+        "type": "object"
+      },
+      "ResultAppointmentOrder": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AppointmentOrder"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultAppointmentVoucher": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AppointmentVoucher"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultBoolean": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultInteger": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListAppointmentOrder": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AppointmentOrder"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListLong": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListMapStringObject": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListShop": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Shop"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListShopType": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShopType"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultListTechnician": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Technician"
+            },
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultLoginResponse": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/LoginResponse"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultLong": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultMapStringObject": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultAppointmentVoucher": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultAppointmentVoucher"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultBlogComment": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultBlogComment"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultMapStringObject": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultMapStringObject"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultPointsLog": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultPointsLog"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultServiceItem": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultServiceItem"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultShop": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultShop"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultPageResultTechnician": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PageResultTechnician"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultRefreshResponse": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RefreshResponse"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultShop": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Shop"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultString": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ResultVoid": {
+        "properties": {
+          "code": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "data": {},
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ServiceItem": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "durationMin": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "itemType": {
+            "type": "string"
+          },
+          "leadTimeMin": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priceCent": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "shopId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Shop": {
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "typeId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ShopType": {
+        "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sort": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SseEmitter": {
+        "properties": {
+          "timeout": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Technician": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "level": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ratingAvg": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ratingCount": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "shopId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workStatus": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TypeRequest": {
+        "properties": {
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sort": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "description": "请求头 authorization: Bearer <AT>（小写头名；AT 为空时不发送）",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "NearSlot"
+    },
+    "description": "时段预约（抢约/Hold/候补/对账）与 AI 助手接口。统一响应 {code,message,data,timestamp}；业务错误码见 BaseCode（501xx 业务 / 100xx Lua / 401xx 认证）。",
+    "license": {
+      "name": "Apache-2.0"
+    },
+    "title": "NearSlot 预约系统 API",
+    "version": "v1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/service-items": {
+      "get": {
+        "description": "管理端；可选按 itemType(SERVICE/PRODUCT) 过滤",
+        "operationId": "ShopAdminController_pageServiceItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "itemType",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultServiceItem"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "服务项分页列表",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "post": {
+        "operationId": "ShopAdminController_createServiceItem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceItem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "创建服务项",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/service-items/{id}": {
+      "delete": {
+        "operationId": "ShopAdminController_deleteServiceItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "删除服务项",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "put": {
+        "operationId": "ShopAdminController_updateServiceItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceItem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "更新服务项",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/shops": {
+      "post": {
+        "operationId": "ShopAdminController_createShop",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Shop"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "创建服务商",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/shops/{id}": {
+      "delete": {
+        "operationId": "ShopAdminController_deleteShop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "删除服务商",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "put": {
+        "operationId": "ShopAdminController_updateShop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Shop"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "更新服务商",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/technicians": {
+      "get": {
+        "description": "管理端；可选按在岗状态过滤，需店铺归属",
+        "operationId": "ShopAdminController_pageTechnicians",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workStatus",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultTechnician"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "技师分页列表",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "post": {
+        "operationId": "ShopAdminController_createTechnician",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Technician"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "创建技师",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/technicians/{id}": {
+      "delete": {
+        "operationId": "ShopAdminController_deleteTechnician",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "删除技师",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "put": {
+        "operationId": "ShopAdminController_updateTechnician",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Technician"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "更新技师",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/technicians/{id}/skills": {
+      "get": {
+        "description": "返回该技师可提供的服务项（含名称/时长/价格/熟练度）",
+        "operationId": "ShopAdminController_listSkills",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "技师技能列表",
+        "tags": [
+          "服务商管理"
+        ]
+      },
+      "post": {
+        "description": "幂等：已存在则更新熟练度；服务项与技师必须同店",
+        "operationId": "ShopAdminController_bindSkill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "绑定技师技能",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/admin/technicians/{id}/skills/{serviceItemId}": {
+      "delete": {
+        "operationId": "ShopAdminController_unbindSkill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "serviceItemId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "解绑技师技能",
+        "tags": [
+          "服务商管理"
+        ]
+      }
+    },
+    "/api/v1/agent/chat": {
+      "post": {
+        "description": "SSE：meta/plan/progress/confirm/error 五类事件",
+        "operationId": "AgentController_chat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseEmitter"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "流式对话",
+        "tags": [
+          "AI 助手"
+        ]
+      }
+    },
+    "/api/v1/agent/confirm": {
+      "post": {
+        "description": "携带 confirmToken **真正执行**被挂起的操作",
+        "operationId": "AgentController_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "确认敏感操作",
+        "tags": [
+          "AI 助手"
+        ]
+      }
+    },
+    "/api/v1/appointments": {
+      "get": {
+        "description": "按状态过滤，游标分页",
+        "operationId": "AppointmentController_myOrders",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListAppointmentOrder"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "我的订单",
+        "tags": [
+          "预约"
+        ]
+      },
+      "post": {
+        "description": "Lua 三重检查（余量/一人一时段/技师时间轴）原子预扣，成功返回 orderId 并进入 Hold 待支付",
+        "operationId": "AppointmentController_book",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "抢约",
+        "tags": [
+          "预约"
+        ]
+      }
+    },
+    "/api/v1/appointments/{id}": {
+      "get": {
+        "description": "按订单号查询；校验归属防止越权",
+        "operationId": "AppointmentController_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultAppointmentOrder"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "订单详情",
+        "tags": [
+          "预约"
+        ]
+      }
+    },
+    "/api/v1/appointments/{id}/cancel": {
+      "post": {
+        "description": "状态机校验后回补 Redis（反转 beforeQty/afterQty，ADR-005）并异步触发候补提升",
+        "operationId": "AppointmentController_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "取消预约",
+        "tags": [
+          "预约"
+        ]
+      }
+    },
+    "/api/v1/appointments/{slotId}/waitlist": {
+      "delete": {
+        "operationId": "AppointmentController_leaveWaitlist",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "退出候补",
+        "tags": [
+          "预约"
+        ]
+      },
+      "post": {
+        "description": "ZSet 公平排序（时间戳+抖动），返回位次；已存在返回原序位",
+        "operationId": "AppointmentController_joinWaitlist",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "加入候补",
+        "tags": [
+          "预约"
+        ]
+      }
+    },
+    "/api/v1/auth/code": {
+      "post": {
+        "description": "生成 6 位验证码写入 Redis(60s)。生产需接短信网关，响应不得回显",
+        "operationId": "AuthController_sendCode",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "phone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "下发验证码",
+        "tags": [
+          "认证"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "description": "支持 password / code 两种类型；BCrypt 校验 + IP/账号双维度防爆破",
+        "operationId": "AuthController_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLoginResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "登录",
+        "tags": [
+          "认证"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "description": "清理四键，旧 AT 立即失效",
+        "operationId": "AuthController_logout",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "登出",
+        "tags": [
+          "认证"
+        ]
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "description": "校验原密码后改密，并 bump version 踢出所有旧会话",
+        "operationId": "AuthController_changePassword",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "修改密码",
+        "tags": [
+          "认证"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "description": "旧 RT 换新 AT；并发刷新由 422 自愈返回最新 AT",
+        "operationId": "AuthController_refresh",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Refresh-Token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "Refresh-Token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRefreshResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "刷新令牌",
+        "tags": [
+          "认证"
+        ]
+      }
+    },
+    "/api/v1/blogs": {
+      "post": {
+        "description": "履约驱动：需本人已完成订单（orderId）",
+        "operationId": "BlogController_publish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "发布笔记",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/by-shop/{shopId}": {
+      "get": {
+        "description": "店铺详情页的用户评价入口",
+        "operationId": "BlogController_byShop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "店铺相关笔记",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/comments/{commentId}": {
+      "delete": {
+        "operationId": "BlogController_deleteComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "删除评论",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/hot": {
+      "get": {
+        "description": "按点赞数倒序（冗余列，不聚合）",
+        "operationId": "BlogController_hot",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "热门笔记",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/mine": {
+      "get": {
+        "operationId": "BlogController_mine",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "我的笔记",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/{id}": {
+      "get": {
+        "operationId": "BlogController_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "笔记详情",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/{id}/comments": {
+      "get": {
+        "operationId": "BlogController_comments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultBlogComment"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "评论列表",
+        "tags": [
+          "内容社区"
+        ]
+      },
+      "post": {
+        "description": "parentId 非空即楼中楼回复",
+        "operationId": "BlogController_addComment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "发表评论",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/blogs/{id}/like": {
+      "post": {
+        "description": "幂等：重复操作不重复计数",
+        "operationId": "BlogController_like",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "like",
+            "required": false,
+            "schema": {
+              "default": true,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultBoolean"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "点赞 / 取消点赞",
+        "tags": [
+          "内容社区"
+        ]
+      }
+    },
+    "/api/v1/feed": {
+      "get": {
+        "description": "小V写扩散 + 大V读取时合并（ADR-027）",
+        "operationId": "FeedController_timeline",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "关注流",
+        "tags": [
+          "关注流"
+        ]
+      }
+    },
+    "/api/v1/files": {
+      "post": {
+        "description": "需登录；扩展名白名单 + 大小上限 + 魔数校验",
+        "operationId": "FileController_upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "上传文件",
+        "tags": [
+          "文件"
+        ]
+      }
+    },
+    "/api/v1/files/{key}": {
+      "get": {
+        "description": "公开只读；key 由上传接口返回",
+        "operationId": "FileController_read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "读取文件",
+        "tags": [
+          "文件"
+        ]
+      }
+    },
+    "/api/v1/follows/followers": {
+      "get": {
+        "operationId": "FollowController_followers",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "我的粉丝列表",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/follows/following": {
+      "get": {
+        "operationId": "FollowController_following",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "我的关注列表",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/follows/stat": {
+      "get": {
+        "description": "关注数/粉丝数/笔记数/获赞数（冗余计数，不 COUNT）",
+        "operationId": "FollowController_stat",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "社交统计",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/follows/stat/{userId}": {
+      "get": {
+        "operationId": "FollowController_statOf",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "他人社交统计",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/follows/{targetUserId}": {
+      "post": {
+        "description": "幂等：重复操作返回 false，不重复计数",
+        "operationId": "FollowController_follow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "targetUserId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "follow",
+            "required": false,
+            "schema": {
+              "default": true,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultBoolean"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "关注 / 取关",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/follows/{targetUserId}/status": {
+      "get": {
+        "operationId": "FollowController_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "targetUserId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultBoolean"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "是否已关注",
+        "tags": [
+          "社交关系"
+        ]
+      }
+    },
+    "/api/v1/internal/reconcile/run": {
+      "post": {
+        "description": "内部接口，需 X-Admin-Token 头",
+        "operationId": "ReconcileController_run",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "手动触发对账",
+        "tags": [
+          "对账运维"
+        ]
+      }
+    },
+    "/api/v1/payments/callback": {
+      "post": {
+        "description": "幂等；订单已取消时转退款",
+        "operationId": "PaymentController_callback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayCallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "支付成功回调",
+        "tags": [
+          "支付"
+        ]
+      }
+    },
+    "/api/v1/points/balance": {
+      "get": {
+        "operationId": "SignController_balance",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultInteger"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "积分余额",
+        "tags": [
+          "签到积分"
+        ]
+      }
+    },
+    "/api/v1/points/logs": {
+      "get": {
+        "description": "可审计：每次变动都有记录与来源",
+        "operationId": "SignController_logs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultPointsLog"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "积分流水",
+        "tags": [
+          "签到积分"
+        ]
+      }
+    },
+    "/api/v1/points/sign": {
+      "post": {
+        "description": "幂等：当天重复签到返回 fresh=false，不重复发积分",
+        "operationId": "SignController_sign",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "签到",
+        "tags": [
+          "签到积分"
+        ]
+      }
+    },
+    "/api/v1/points/sign/status": {
+      "get": {
+        "description": "今日是否已签 + 当月签到日历 + 连续天数 + 余额",
+        "operationId": "SignController_status",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "签到状态",
+        "tags": [
+          "签到积分"
+        ]
+      }
+    },
+    "/api/v1/reviews": {
+      "post": {
+        "description": "仅本人已完成订单可评，一单一评",
+        "operationId": "ReviewController_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "提交评价",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/mine": {
+      "get": {
+        "operationId": "ReviewController_mine",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "我的评价",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/shops/{shopId}": {
+      "get": {
+        "description": "公开只读",
+        "operationId": "ReviewController_byShop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "店铺评价列表",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/technicians/{technicianId}": {
+      "get": {
+        "description": "公开只读",
+        "operationId": "ReviewController_byTechnician",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "technicianId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "技师评价列表",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/technicians/{technicianId}/stat": {
+      "get": {
+        "description": "均分与条数（公开）",
+        "operationId": "ReviewController_statOfTechnician",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "technicianId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "技师评分概况",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/{id}": {
+      "delete": {
+        "description": "仅本人；会回滚技师评分聚合",
+        "operationId": "ReviewController_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "撤回评价",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/reviews/{id}/reply": {
+      "post": {
+        "description": "仅本店铺 MERCHANT 或 PLATFORM",
+        "operationId": "ReviewController_reply",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "商家回复",
+        "tags": [
+          "评价"
+        ]
+      }
+    },
+    "/api/v1/shop-types": {
+      "get": {
+        "description": "公开只读，按 sort 升序",
+        "operationId": "ShopTypeController_list",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListShopType"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "分类列表",
+        "tags": [
+          "店铺分类"
+        ]
+      },
+      "post": {
+        "description": "需 MERCHANT/PLATFORM",
+        "operationId": "ShopTypeController_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "新建分类",
+        "tags": [
+          "店铺分类"
+        ]
+      }
+    },
+    "/api/v1/shop-types/{id}": {
+      "delete": {
+        "operationId": "ShopTypeController_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "删除分类",
+        "tags": [
+          "店铺分类"
+        ]
+      },
+      "put": {
+        "operationId": "ShopTypeController_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TypeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "更新分类",
+        "tags": [
+          "店铺分类"
+        ]
+      }
+    },
+    "/api/v1/shops": {
+      "get": {
+        "description": "分页返回，供前端首页加载",
+        "operationId": "ShopController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "typeId",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultShop"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "服务商列表",
+        "tags": [
+          "服务商"
+        ]
+      }
+    },
+    "/api/v1/shops/nearby": {
+      "get": {
+        "description": "GEOSEARCH 半径检索，按距离升序返回前 20 条",
+        "operationId": "ShopController_nearby",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "x",
+            "required": true,
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y",
+            "required": true,
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "km",
+            "required": false,
+            "schema": {
+              "format": "double",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListShop"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "附近服务商",
+        "tags": [
+          "服务商"
+        ]
+      }
+    },
+    "/api/v1/shops/{id}": {
+      "get": {
+        "description": "缓存三防（布隆防穿透 + 空值缓存 + TTL Jitter）",
+        "operationId": "ShopController_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultShop"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "服务商详情",
+        "tags": [
+          "服务商"
+        ]
+      }
+    },
+    "/api/v1/shops/{id}/technicians": {
+      "get": {
+        "description": "按服务商查询技师",
+        "operationId": "ShopController_technicians",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListTechnician"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "服务商技师列表",
+        "tags": [
+          "服务商"
+        ]
+      }
+    },
+    "/api/v1/slots": {
+      "get": {
+        "description": "按服务商查询 available 时段及其余量（公开只读）",
+        "operationId": "SlotController_listByShop",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "serviceItemId",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "服务商可约时段",
+        "tags": [
+          "时段管理"
+        ]
+      },
+      "post": {
+        "description": "落库 + 预热余量 + 广播缓存失效；需 MERCHANT/PLATFORM 且店铺归属匹配",
+        "operationId": "SlotController_publish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishSlotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "发布时段",
+        "tags": [
+          "时段管理"
+        ]
+      }
+    },
+    "/api/v1/slots/{id}/close": {
+      "post": {
+        "description": "状态置关闭 + 删余量 + 广播；需店铺归属匹配",
+        "operationId": "SlotController_close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultVoid"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "关闭时段",
+        "tags": [
+          "时段管理"
+        ]
+      }
+    },
+    "/api/v1/system/ping": {
+      "get": {
+        "description": "用于 TPS 压测，无任何业务逻辑",
+        "operationId": "SystemController_ping",
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultString"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "空接口基准",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/api/v1/tech-rank/{shopId}": {
+      "get": {
+        "description": "按已支付成交单数倒序，TTL 90 天",
+        "operationId": "TechRankController_top",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shopId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "format": "date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultListMapStringObject"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "每日热门技师榜",
+        "tags": [
+          "技师榜"
+        ]
+      }
+    },
+    "/api/v1/vouchers": {
+      "get": {
+        "description": "商家侧；按店铺隔离，MP 分页",
+        "operationId": "VoucherController_page",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPageResultAppointmentVoucher"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "待核销列表",
+        "tags": [
+          "履约核销"
+        ]
+      }
+    },
+    "/api/v1/vouchers/orders/{orderId}": {
+      "get": {
+        "description": "用户出示；归属校验在后端",
+        "operationId": "VoucherController_byOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orderId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultAppointmentVoucher"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "按订单取核销码",
+        "tags": [
+          "履约核销"
+        ]
+      }
+    },
+    "/api/v1/vouchers/redeem": {
+      "post": {
+        "description": "商家扫码；店铺隔离 + 幂等（重复核销返回业务错误）",
+        "operationId": "VoucherController_redeem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultLong"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "核销",
+        "tags": [
+          "履约核销"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Generated server url",
+      "url": "http://localhost:8081"
+    }
+  ],
+  "tags": [
+    {
+      "description": "关注 / 粉丝（FR-8）",
+      "name": "社交关系"
+    },
+    {
+      "description": "时段发布 / 关闭（FR-2.2）",
+      "name": "时段管理"
+    },
+    {
+      "description": "图片上传与读取（FR-11）",
+      "name": "文件"
+    },
+    {
+      "description": "每日签到 / 积分账户（FR-9）",
+      "name": "签到积分"
+    },
+    {
+      "description": "手动触发对账（内部）",
+      "name": "对账运维"
+    },
+    {
+      "description": "核销码签发 / 出示 / 核销（FR-6.1）",
+      "name": "履约核销"
+    },
+    {
+      "description": "支付回调（FR-4.2）",
+      "name": "支付"
+    },
+    {
+      "description": "自然语言预约/查询（FR-5.1/5.2）",
+      "name": "AI 助手"
+    },
+    {
+      "description": "探店笔记 / 点赞 / 评论（FR-7）",
+      "name": "内容社区"
+    },
+    {
+      "description": "关注的人的笔记（FR-8）",
+      "name": "关注流"
+    },
+    {
+      "description": "登录 / 验证码（FR-1）",
+      "name": "认证"
+    },
+    {
+      "description": "探活与容量基准",
+      "name": "系统"
+    },
+    {
+      "description": "抢约 / Hold / 取消（FR-3）",
+      "name": "预约"
+    },
+    {
+      "description": "服务商/技师/服务项 CRUD（FR-2.1）",
+      "name": "服务商管理"
+    },
+    {
+      "description": "分类字典（FR-10）",
+      "name": "店铺分类"
+    },
+    {
+      "description": "服务商详情 / 附近检索（FR-2）",
+      "name": "服务商"
+    },
+    {
+      "description": "评分与评价（FR-12，履约驱动）",
+      "name": "评价"
+    },
+    {
+      "description": "每日热门技师 Top N（FR-4.3）",
+      "name": "技师榜"
+    }
+  ],
+  "x-openapi": {
+    "x-markdownFiles": [],
+    "x-setting": {
+      "customCode": 200,
+      "enableAfterScript": true,
+      "enableDebug": true,
+      "enableDocumentManage": true,
+      "enableDynamicParameter": false,
+      "enableFilterMultipartApiMethodType": "POST",
+      "enableFilterMultipartApis": false,
+      "enableFooter": true,
+      "enableFooterCustom": false,
+      "enableGroup": true,
+      "enableHomeCustom": false,
+      "enableHost": false,
+      "enableHostText": "",
+      "enableOpenApi": true,
+      "enableReloadCacheParameter": false,
+      "enableRequestCache": true,
+      "enableResponseCode": true,
+      "enableSearch": true,
+      "enableSwaggerModels": true,
+      "enableVersion": false,
+      "language": "zh-CN",
+      "swaggerModelName": "Swagger Models"
+    }
+  }
+}
