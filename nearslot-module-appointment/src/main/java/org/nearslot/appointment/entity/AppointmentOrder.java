@@ -24,6 +24,17 @@ public class AppointmentOrder extends BaseEntity {
     private String fulfillmentMode;
     private Integer status;
     private Integer amountCent;
+
+    // ------- 前端展示字段（评审 F-008：与 nearslot-web/types/api.ts Appointment 契约对齐）-------
+    /** 预约时段开始时间（ISO，序列化由 JacksonConfig 带时区输出）。 */
+    private java.time.LocalDateTime startsAt;
+    /** IANA 时区（前端用 Intl.DateTimeFormat(tzId) 渲染墙钟时间）。 */
+    private String tzId;
+    /** 冗余展示字段，避免前端 N+1 查询。 */
+    private String shopName;
+    private String technicianName;
+    /** 前端按 amountCents 读取（兼容旧字段名）。 */
+    private Integer amountCents;
     private LocalDateTime holdExpiresAt;
     /** 对账状态：1 待对账 / 2 不一致 / 4 已一致（ReconcileStatus）。 */
     private Integer reconcileStatus;

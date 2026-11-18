@@ -67,10 +67,13 @@ public class CommentService {
         if (!c.getUserId().equals(userId)) {
             throw new BaseException(BaseCode.FORBIDDEN, "只能删除自己的评论");
         }
-        if (c.getStatus() != null && c.getStatus() == 2) return;  // 幂等
-        commentMapper.update(null,
+        // 评审 A-003（与评价撤回 A-001 同型 TOCTOU）：
+        // 必须 CAS + 影响行数判断，否则并发双击会重复扣减评论计数。
+        // 原先的 if(status==2) return 是死码且无并发保护。
+        int affected = commentMapper.update(null,
             new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<BlogComment>()
-                .eq("id", commentId).set("status", 2));
+                .eq("id", commentId).eq("status", 1).set("status", 2));
+        if (affected == 0) return;
         blogMapper.update(null,
             new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Blog>()
                 .eq("id", c.getBlogId())

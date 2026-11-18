@@ -4,17 +4,19 @@ import org.nearslot.framework.config.properties.FrameworkProperties;
 import org.springframework.amqp.core.Message;
 
 /**
- * RabbitMQ 消费模板（ADR-014）：统一 幂等 → 业务 → 失败登记 三段式。
- * 与 PickNear 一致：事务提交后发送、手动 ack、x-retry-count 重试、超限进死信。
- * 投递延迟门：消息头 producerTime 超过阈值即视为过期，回补并丢弃。
+ * RabbitMQ 消费模板（ADR-014）：幂等占位 → 业务 → 失败登记 三段式。
  *
- * **2026-11-18 治理**：重试次数与延迟门阈值改为从
- * {@link FrameworkProperties}（`nearslot.framework.mq-*`）读取，
- * 不再写死 3 / 10000 —— 这两个值直接决定故障恢复速度与消息放大倍数，
- * 不同环境（本地调试要快、生产要稳）合理取值不同。
+ * 能力边界（评审 C-005 如实声明，2026-11-18）：
+ * 本类只实现「投递延迟门 + 幂等占位 + 业务执行 + 失败登记回调」。
+ * x-retry-count 重试计数与死信队列转投**并未实现**——此前注释声称"超限进死信"是纸面描述。
+ * 当前生产代码没有消费者继承本类（仅单测使用），故无运行时误导；现在如实写明，
+ * 避免后续接入方照错误注释实现。
  *
- * 消息头名称（producerTime / x-retry-count）保持常量：
- * 它们是**跨服务协议**的一部分，改了要同步改生产方与死信处理，不属于调参。
+ * 若后续需要重试/死信：由 broker 的 x-dead-letter-exchange 实现，
+ * 或在本 handle() 读 HEADER_RETRY 计数转投——二选一，届时同步更新本注释。
+ *
+ * 延迟门阈值来自 {@link FrameworkProperties#getMqMessageDelayMs()}；
+ * 消息头名称是跨服务协议常量，不属于调参。
  */
 public abstract class AbstractRabbitConsumer<T> {
 

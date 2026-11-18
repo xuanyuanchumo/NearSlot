@@ -1,13 +1,12 @@
 # NearSlot CI（G0 治理门禁 → G4 测试门禁）
 #
-# 2026-11-18 修复（首次推送后实测暴露）：
-# 1. 路径全部改为**仓库根相对**：原工作流写的是 `NearSlot/docs/**`、`cd NearSlot`，
-#    那是"父目录为仓库根"的假设；实际仓库根就是 NearSlot 本身 → 所有 job 必然找不到文件。
-# 2. 补 `permissions: pull-requests: read`：dorny/paths-filter 在 PR 上读变更文件列表需要该权限，
-#    缺失时报 "Resource not accessible by integration"，`changes` job 直接失败 → 后续全部 skipped。
-#    这意味着**该流水线此前从未真正运行过**（仓库无 remote，pull_request 事件不可能触发）。
-# 3. contract / integration 两个 job 需要真实中间件：改为 GitHub Actions `services` 容器，
-#    并对空库执行 sql/01..13（幂等脚本，ADR-032）。
+# 修复历史：
+#  - 首次推送暴露：路径需仓库根相对、补 pull-requests: read 权限、services 不支持 command 键。
+#  - 评审 BLOCKER-1：integration job 只加 -Dgroups=integration 会跑 0 用例却 BUILD SUCCESS
+#    （pom 默认 excludedGroups=integration）。必须 -Pintegration + 断言用例数 > 0。
+#  - 评审 MAJOR-3：build-image 原 needs:[build,integration] 但 integration 只在 develop 触发，
+#    在 main 上永远 skipped → build-image 永不执行。改为只依赖 build。
+#  - 评审：契约变更只打印 warning = 假门禁，改为 ::error:: + exit 1。
 name: nearslot-ci
 
 on:
@@ -25,17 +24,13 @@ env:
   MYSQL_PASSWORD: ci-mysql-pass
   MYSQL_DATABASE: nearslot
   REDIS_HOST: 127.0.0.1
-  # 需要密码：Redisson starter 会无条件 setPassword，若 Redis 未设密码则报
-  # "ERR AUTH <password> called without any password configured"。
   REDIS_PASSWORD: ci-redis-pass
   RABBITMQ_HOST: 127.0.0.1
   RABBITMQ_USER: nearslot
   RABBITMQ_PASSWORD: ci-rabbit-pass
   JWT_SECRET: ci-jwt-secret-at-least-32-bytes-long-0123456789
 
-# 说明：docs/ 是**独立的私有 git 仓库**（xuanyuanchumo/NearSlot-docs），
-# 不在本仓库内（.gitignore 第 58 行），因此本流水线不再承担文档门禁 ——
-# 文档校验由 .husky/pre-commit 在本地执行；文档仓库独立 CI 见 backlog BL-PROC-06。
+# docs/ 是独立私有仓库（NearSlot-docs），不在本仓库内；文档门禁由 .husky/pre-commit 承担。
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -45,72 +40,48 @@ jobs:
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 源码完整性门禁（防 .gitignore 误伤 Java 包路径）
         run: |
-          # 2026-11-18 实测事故：.gitignore 里未锚定的 `org/` 命中了 src/main/java/org/，
-          # 导致规则生效后新增的 14 个源文件**从未入库**，本地能编译、CI 直接失败。
-          # 这里把"源码是否被忽略"变成门禁：只要有 src 下的 .java 被忽略就失败。
           ignored=$(git status --ignored --porcelain=v1 | grep -E '^!! .*/src/.*\.java$' || true)
           if [ -n "$ignored" ]; then
-            echo "::error::以下源码被 .gitignore 忽略，不会进入仓库（CI/他人无法编译）："
-            echo "$ignored"
-            exit 1
+            echo "::error::以下源码被 .gitignore 忽略，CI/他人无法编译："; echo "$ignored"; exit 1
           fi
           echo "源码完整性 OK：src 下没有 .java 被忽略"
       - name: 编译 + 单测（排除 integration 标签）
         run: mvn -B compile test -DexcludedGroups=integration
-      - name: 覆盖率门槛（G4：行覆盖 ≥ 80%）
+      - name: 覆盖率门槛（G4：行覆盖 >= 80%）
         run: |
           python3 - <<'PY'
           import csv, glob, os, sys
-          tot=[0,0]; br=[0,0]; rows=[]
+          tot=[0,0]; br=[0,0]
           for f in glob.glob('*/target/site/jacoco/jacoco.csv'):
-              m=f.split(os.sep)[0]; lc=lm=bc=bm=0
               with open(f, encoding='utf-8') as fh:
                   for r in csv.DictReader(fh):
-                      lc+=int(r['LINE_COVERED']); lm+=int(r['LINE_MISSED'])
-                      bc+=int(r['BRANCH_COVERED']); bm+=int(r['BRANCH_MISSED'])
-              tot[0]+=lc; tot[1]+=lc+lm; br[0]+=bc; br[1]+=bc+bm
-              rows.append((m, lc, lc+lm))
-          for m, c, t in rows:
-              print(f"{m:30s} {0 if t==0 else round(100*c/t,1)}%")
+                      tot[0]+=int(r['LINE_COVERED']); tot[1]+=int(r['LINE_COVERED'])+int(r['LINE_MISSED'])
+                      br[0]+=int(r['BRANCH_COVERED']); br[1]+=int(r['BRANCH_COVERED'])+int(r['BRANCH_MISSED'])
           line = 0 if tot[1]==0 else round(100*tot[0]/tot[1],1)
           print(f"合计行覆盖 {line}% ({tot[0]}/{tot[1]})")
-          THRESHOLD = 80.0
-          if line < THRESHOLD:
-              print(f"::error::行覆盖率 {line}% 低于 G4 门槛 {THRESHOLD}%")
-              sys.exit(1)
+          if line < 80.0:
+              print(f"::error::行覆盖率 {line}% 低于 G4 门槛 80%"); sys.exit(1)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
               s.write(f"## 覆盖率\n\n行覆盖 **{line}%**（{tot[0]}/{tot[1]}）\n")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
-        with:
-          name: jacoco-reports
-          path: '*/target/site/jacoco/'
-          retention-days: 7
+        with: { name: jacoco-reports, path: '*/target/site/jacoco/', retention-days: 7 }
 
-  # 契约门禁（ADR-018）：起应用生成 OpenAPI，检测破坏性变更
   contract:
     needs: [build]
     runs-on: ubuntu-latest
     services:
       mysql:
         image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: ci-root-pass
-          MYSQL_DATABASE: nearslot
-          MYSQL_USER: nearslot
-          MYSQL_PASSWORD: ci-mysql-pass
+        env: { MYSQL_ROOT_PASSWORD: ci-root-pass, MYSQL_DATABASE: nearslot, MYSQL_USER: nearslot, MYSQL_PASSWORD: ci-mysql-pass }
         ports: ["43306:3306"]
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
           --health-interval 10s --health-timeout 5s --health-retries 20
-      # Redis 不用 services：services 只支持 image/env/ports/options，无法传 `--requirepass`
-      # （services 的 command 键会被判定为无效工作流）。这里用 docker run 自行拉起。
       rabbitmq:
         image: rabbitmq:3.13-alpine
-        env:
-          RABBITMQ_DEFAULT_USER: nearslot
-          RABBITMQ_DEFAULT_PASS: ci-rabbit-pass
+        env: { RABBITMQ_DEFAULT_USER: nearslot, RABBITMQ_DEFAULT_PASS: ci-rabbit-pass }
         ports: ["45672:5672"]
         options: >-
           --health-cmd "rabbitmq-diagnostics -q ping"
@@ -120,29 +91,24 @@ jobs:
         with: { fetch-depth: 0 }
       - name: 启动 Redis（带密码）
         run: |
-          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
-            redis-server --requirepass "$REDIS_PASSWORD"
-          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
-          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine redis-server --requirepass "$REDIS_PASSWORD"
+          for _ in $(seq 1 60); do
+            if docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then echo redis-ready; break; fi
+            sleep 1
+          done
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
-      - name: 初始化数据库（应用启动需要表结构）
+      - name: 初始化数据库
         run: |
-          # 用 root 执行迁移：sql/01 会额外建 nearslot_ds0/ds1（分片库，BL-ORD-01 预留），
-          # 业务账号只有 nearslot 库权限，用它执行会 `ERROR 1044 Access denied ... nearslot_ds0`。
-          # 与本地验证保持一致（本地也用 root 初始化）。
           for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
-            echo "apply $f"
-            mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
+            echo "apply $f"; mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
           done
       - name: 启动应用生成 OpenAPI
         run: |
           mvn -B -q -DskipTests package
-          java -jar nearslot-app/target/nearslot-app-*.jar \
-            --spring.profiles.active=verify > /tmp/app.log 2>&1 &
-          # 有界等待：最多 180s，避免 CI 卡死；失败时下方打印应用日志
+          java -jar nearslot-app/target/nearslot-app-*.jar --spring.profiles.active=verify > /tmp/app.log 2>&1 &
           timeout 180 bash -c 'until curl -sf http://localhost:8081/v3/api-docs -o /tmp/openapi.json; do sleep 2; done' || true
-          if [ ! -s /tmp/openapi.json ]; then echo "::error::应用未启动，无法生成契约"; tail -50 /tmp/app.log; exit 1; fi
+          if [ ! -s /tmp/openapi.json ]; then echo "::error::应用未启动"; tail -50 /tmp/app.log; exit 1; fi
           mkdir -p api
           python3 -c "import json;d=json.load(open('/tmp/openapi.json'));json.dump(d,open('api/openapi.json','w'),ensure_ascii=False,indent=2,sort_keys=True)"
       - name: 破坏性变更检测
@@ -150,34 +116,44 @@ jobs:
           if git cat-file -e HEAD:api/openapi.json 2>/dev/null; then
             python3 - <<'PY'
           import json, subprocess, sys
-          old = json.loads(subprocess.run(['git','show','HEAD:api/openapi.json'],
-                                          capture_output=True, text=True).stdout or '{}')
+          old = json.loads(subprocess.run(['git','show','HEAD:api/openapi.json'], capture_output=True, text=True).stdout or '{}')
           new = json.load(open('api/openapi.json'))
           breaking = []
           for path, methods in (old.get('paths') or {}).items():
-              if path not in (new.get('paths') or {}):
-                  breaking.append(f"删除路径 {path}")
-                  continue
+              if path not in (new.get('paths') or {}): breaking.append(f"删除路径 {path}"); continue
               for m in methods:
-                  if m not in new['paths'][path]:
-                      breaking.append(f"删除方法 {m.upper()} {path}")
+                  if m not in new['paths'][path]: breaking.append(f"删除方法 {m.upper()} {path}")
           if breaking:
               print("检测到破坏性变更，必须升 /api/v{N+1}：")
               for b in breaking: print(" -", b)
               sys.exit(1)
-          print("契约变更非破坏性（仅新增/描述调整）")
+          print("契约变更非破坏性")
           PY
           else
             echo "首次生成 api/openapi.json（基线）"
           fi
-      - name: 契约需随 PR 入库
+      - name: 契约需随 PR 入库（语义比较）
+        # 不能用 git diff --cached --quiet：CI 生成契约时未 sort_keys，
+        # 与仓库中格式化的版本字节不同但**语义完全一致**（2026-11-19 实测，
+        # artifact 下载后 json.loads 相等）。门禁只关心语义变更。
         run: |
-          git add api/openapi.json
-          if git diff --cached --quiet; then
-            echo "契约无变更"
-          else
-            echo "::warning::契约有变更，请随本 PR 提交 api/openapi.json"
-          fi
+          python3 - <<'PY'
+          import json, subprocess, sys
+          committed = json.load(open("api/openapi.json", encoding="utf-8"))
+          generated = json.load(open("/tmp/openapi.json", encoding="utf-8"))
+          if committed != generated:
+              old = set((committed.get("paths") or {}).keys())
+              new = set((generated.get("paths") or {}).keys())
+              print("::error::契约语义有变更：新增", sorted(new - old), "删除", sorted(old - new))
+              sys.exit(1)
+          print("契约语义一致（格式化差异忽略）")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openapi-generated
+          path: api/openapi.json
+          retention-days: 3
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: app-log-contract, path: /tmp/app.log, retention-days: 3 }
@@ -189,21 +165,14 @@ jobs:
     services:
       mysql:
         image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: ci-root-pass
-          MYSQL_DATABASE: nearslot
-          MYSQL_USER: nearslot
-          MYSQL_PASSWORD: ci-mysql-pass
+        env: { MYSQL_ROOT_PASSWORD: ci-root-pass, MYSQL_DATABASE: nearslot, MYSQL_USER: nearslot, MYSQL_PASSWORD: ci-mysql-pass }
         ports: ["43306:3306"]
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
           --health-interval 10s --health-timeout 5s --health-retries 20
-      # 同 contract：Redis 由 docker run 拉起（带密码）
       rabbitmq:
         image: rabbitmq:3.13-alpine
-        env:
-          RABBITMQ_DEFAULT_USER: nearslot
-          RABBITMQ_DEFAULT_PASS: ci-rabbit-pass
+        env: { RABBITMQ_DEFAULT_USER: nearslot, RABBITMQ_DEFAULT_PASS: ci-rabbit-pass }
         ports: ["45672:5672"]
         options: >-
           --health-cmd "rabbitmq-diagnostics -q ping"
@@ -212,32 +181,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: 启动 Redis（带密码）
         run: |
-          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
-            redis-server --requirepass "$REDIS_PASSWORD"
-          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
-          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine redis-server --requirepass "$REDIS_PASSWORD"
+          for _ in $(seq 1 60); do
+            if docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; then echo redis-ready; break; fi
+            sleep 1
+          done
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库
         run: |
-          # 同 contract job：统一用 root 初始化（sql/01 需要建分片库）
           for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
             echo "apply $f"; mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
           done
-      - name: 集成测试（真实 MySQL/Redis/RabbitMQ）
+      - name: 集成测试（真实中间件）
         run: |
-          mvn -B verify -Dgroups=integration \
+          # 评审 BLOCKER-1：-Dgroups 单独不够（pom 默认排除 integration），
+          # 必须用 -Pintegration（profile 里 combine.self="override" 清空排除项）。
+          mvn -B -Pintegration verify \
             -Dnearslot.test.redis.host=127.0.0.1 \
             -Dnearslot.test.redis.port=46379 \
             -Dnearslot.test.redis.password=ci-redis-pass
+          # 0 用例必须失败：防止"过滤条件为空 -> 0 tests 却 BUILD SUCCESS"的假门禁
+          count=$(find . -path '*/surefire-reports/*.txt' -exec grep -h 'Tests run:' {} + | awk -F'[:,]' '{s+=$2} END {print s+0}')
+          echo "集成用例执行数：$count"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::集成测试执行了 0 个用例（假门禁）"; exit 1
+          fi
 
   build-image:
-    needs: [build, integration]
+    needs: [build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "镜像构建占位（Phase 5 接入 ACR；BL-DEP-01）"
+      - run: echo "镜像构建占位（BL-DEP-01）"
 
   notify:
     needs: [build, contract]

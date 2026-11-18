@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-cd "D:/Projects/TraeProjects/Studying/NearSlot" || exit 9
-MYSQL="D:/MySQL/MySQL Server 8.0/bin/mysql"
-echo "=== 建库 ==="
-"$MYSQL" -uroot -h127.0.0.1 -P3306 < sql/01_create_database.sql 2>&1 | head -5
-echo "=== 建表 ==="
-"$MYSQL" -uroot -h127.0.0.1 -P3306 < sql/02_business.sql 2>&1 | head -5
-echo "=== 迁移脚本 ==="
-for f in sql/3_*.sql sql/4_*.sql; do
-  [ -f "$f" ] && echo "  applying $f" && "$MYSQL" -uroot -h127.0.0.1 -P3306 nearslot < "$f" 2>&1 | head -3
-done
+# 初始化本地测试库（ADR-032：中间件统一 Docker）
+# 评审 E-001：原用 sql/3_*.sql sql/4_*.sql 旧数字 glob，03~13 全部跳过。
+# 改为 find | sort，按两位零填充顺序应用全部迁移。
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+
+apply_all() {
+  local db="$1"
+  for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
+    echo "  applying $f"
+    docker exec -i nearslot-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' < "$f" >/dev/null
+  done
+}
+
+echo "=== 建库 + 全部迁移 ==="
+apply_all nearslot
 echo "=== 表清单 ==="
-"$MYSQL" -uroot -h127.0.0.1 -P3306 -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema=\"nearslot\" ORDER BY table_name;" 2>&1 | head -20
+docker exec nearslot-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" nearslot -N -e "SHOW TABLES"' | head -30

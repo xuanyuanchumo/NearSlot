@@ -38,6 +38,7 @@ class SlotBookingCoreTest {
     private AppointmentOrderMapper orderMapper;
     private ReconcileService reconcileService;
     private HoldTimeoutTask holdTimeoutTask;
+    private HoldPersistence holdPersistence;
     private SlotBookingCore core;
 
     @BeforeEach
@@ -47,8 +48,10 @@ class SlotBookingCoreTest {
         orderMapper = mock(AppointmentOrderMapper.class);
         reconcileService = mock(ReconcileService.class);
         holdTimeoutTask = mock(HoldTimeoutTask.class);
+        holdPersistence = mock(HoldPersistence.class);
         core = new SlotBookingCore(luaService, timeSlotMapper, orderMapper, reconcileService,
-            holdTimeoutTask, new org.nearslot.appointment.config.AppointmentProperties());
+            holdTimeoutTask, holdPersistence,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     private TimeSlot slot(Integer status, int capacity) {
@@ -135,14 +138,13 @@ class SlotBookingCoreTest {
         Long orderId = core.book(USER_ID, SLOT_ID);
 
         assertNotNull(orderId);
-        ArgumentCaptor<AppointmentOrder> captor = ArgumentCaptor.forClass(AppointmentOrder.class);
-        verify(orderMapper).insert(captor.capture());
-        AppointmentOrder saved = captor.getValue();
-        assertEquals(USER_ID, saved.getUserId());
-        assertEquals(SLOT_ID, saved.getSlotId());
+        // 评审 B-001：落单已拆分到 HoldPersistence，验证委托而非 orderMapper.insert 细节
+        ArgumentCaptor<org.nearslot.appointment.entity.TimeSlot> captor =
+            ArgumentCaptor.forClass(org.nearslot.appointment.entity.TimeSlot.class);
+        verify(holdPersistence).persistHold(eq(USER_ID), captor.capture(), anyLong());
+        org.nearslot.appointment.entity.TimeSlot saved = captor.getValue();
+        assertEquals(SLOT_ID, saved.getId());
         assertEquals(STAFF_ID, saved.getServiceStaffId());
-        assertEquals(OrderStatus.PENDING.getCode(), saved.getStatus());
-        assertNotNull(saved.getHoldExpiresAt());
         // capacity 必须传给 Lua（余量键缺失时脚本用它兜底重建，否则该时段永久不可约）
         verify(luaService).book(eq(USER_ID), eq(SLOT_ID), eq(STAFF_ID), anyLong(), anyLong(),
             anyLong(), anyLong(), eq(5));
@@ -156,7 +158,9 @@ class SlotBookingCoreTest {
         when(timeSlotMapper.selectById(SLOT_ID)).thenReturn(slot(1, 3));
         when(luaService.book(anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(),
             anyLong(), anyInt())).thenReturn(luaResult(200));
-        doThrow(new IllegalStateException("DB down")).when(orderMapper).insert(any(AppointmentOrder.class));
+        // 评审 B-001：落库失败现在由独立 Bean 抛出
+        org.mockito.Mockito.doThrow(new IllegalStateException("DB down"))
+            .when(holdPersistence).persistHold(anyLong(), any(org.nearslot.appointment.entity.TimeSlot.class), anyLong());
 
         assertThrows(IllegalStateException.class, () -> core.book(USER_ID, SLOT_ID));
 

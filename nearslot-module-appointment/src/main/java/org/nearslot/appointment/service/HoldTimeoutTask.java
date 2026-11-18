@@ -65,6 +65,8 @@ public class HoldTimeoutTask {
     private final ApplicationEventPublisher eventPublisher;
     /** 扫描周期等策略外置到 `nearslot.appointment.*`（调度本身用 fixedDelayString 引用同一键）。 */
     private final org.nearslot.appointment.config.AppointmentProperties props;
+    /** 评审 B-001：超时回补事务在独立 Bean 执行，避免同类自调用绕过代理。 */
+    private final HoldExpiryExecutor holdExpiryExecutor;
 
     /** 下单成功后调用：投递延迟消息（主路径）。 */
     public void scheduleExpire(AppointmentOrder order, long holdSeconds) {
@@ -81,7 +83,7 @@ public class HoldTimeoutTask {
                 if (o == null || o.getStatus() != OrderStatus.PENDING.getCode()) {
                     return;  // 已支付或已取消，忽略（幂等）
                 }
-                expireOne(o);
+                holdExpiryExecutor.expireOne(o);
             } catch (RuntimeException e) {
                 log.error("Hold 超时消费失败 payload={}", payload, e);
             }
@@ -99,41 +101,9 @@ public class HoldTimeoutTask {
         if (expired.isEmpty()) return;
         log.info("兜底扫描发现过期 Hold {} 笔", expired.size());
         expired.forEach(o -> {
-            try { expireOne(o); }
+            try { holdExpiryExecutor.expireOne(o); }
             catch (RuntimeException e) { log.error("兜底回补失败 orderId={}", o.getId(), e); }
         });
     }
 
-    /** 单笔过期处理：先回补 Redis，成功后再置 CANCELLED。 */
-    @Transactional(rollbackFor = Exception.class)
-    public void expireOne(AppointmentOrder order) {
-        TimeSlot slot = timeSlotMapper.selectById(order.getSlotId());
-        if (slot == null) {
-            log.warn("Hold 超时但时段不存在 orderId={}", order.getId());
-            return;
-        }
-        // 幂等闸：再次确认状态，避免延迟队列与兜底扫描重复处理
-        AppointmentOrder fresh = orderMapper.selectById(order.getId());
-        if (fresh == null || fresh.getStatus() != OrderStatus.PENDING.getCode()) return;
-
-        long startTs = slot.getStartsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        long endTs = slot.getEndsAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-        int capacity = slot.getCapacity() == null ? 1 : slot.getCapacity();
-
-        BookResult r = luaService.rollback(fresh.getUserId(), fresh.getSlotId(),
-            fresh.getServiceStaffId(), startTs, endTs, fresh.getId(), IdGenerator.nextId(), 1, capacity);
-
-        if (!r.success()) {
-            log.error("Hold 超时回补失败，订单保持 PENDING 待下一轮重试 orderId={} code={}",
-                fresh.getId(), r.getCode());
-            throw new IllegalStateException("回补失败 code=" + r.getCode());
-        }
-
-        fresh.setStatus(OrderStatus.CANCELLED.getCode());
-        orderMapper.updateById(fresh);
-        log.info("Hold 超时回补成功 orderId={} logType={}", fresh.getId(), LogType.RESTORE.getCode());
-
-        // 余量已回流：发布事件，由 PromotionService 异步提升候补（与取消路径行为一致）
-        eventPublisher.publishEvent(new SlotOpenedEvent(fresh.getSlotId()));
-    }
 }
