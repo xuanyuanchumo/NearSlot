@@ -126,9 +126,12 @@ jobs:
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库（应用启动需要表结构）
         run: |
+          # 用 root 执行迁移：sql/01 会额外建 nearslot_ds0/ds1（分片库，BL-ORD-01 预留），
+          # 业务账号只有 nearslot 库权限，用它执行会 `ERROR 1044 Access denied ... nearslot_ds0`。
+          # 与本地验证保持一致（本地也用 root 初始化）。
           for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
             echo "apply $f"
-            mysql -h127.0.0.1 -P43306 -unearslot -pci-mysql-pass nearslot < "$f"
+            mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
           done
       - name: 启动应用生成 OpenAPI
         run: |
@@ -214,8 +217,9 @@ jobs:
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库
         run: |
+          # 同 contract job：统一用 root 初始化（sql/01 需要建分片库）
           for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
-            echo "apply $f"; mysql -h127.0.0.1 -P43306 -unearslot -pci-mysql-pass nearslot < "$f"
+            echo "apply $f"; mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
           done
       - name: 集成测试（真实 MySQL/Redis/RabbitMQ）
         run: |
