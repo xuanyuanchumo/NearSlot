@@ -25,9 +25,9 @@ env:
   MYSQL_PASSWORD: ci-mysql-pass
   MYSQL_DATABASE: nearslot
   REDIS_HOST: 127.0.0.1
-  # CI 的 redis 服务容器无法传启动参数（services 不支持 command 键），故不设密码。
-  # 本地/生产仍按 .env 配置密码；验证"需鉴权的 Redis 行为"请在本地 E2E 做（已有 verify_*.sh）。
-  REDIS_PASSWORD: ""
+  # 需要密码：Redisson starter 会无条件 setPassword，若 Redis 未设密码则报
+  # "ERR AUTH <password> called without any password configured"。
+  REDIS_PASSWORD: ci-redis-pass
   RABBITMQ_HOST: 127.0.0.1
   RABBITMQ_USER: nearslot
   RABBITMQ_PASSWORD: ci-rabbit-pass
@@ -104,12 +104,8 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
           --health-interval 10s --health-timeout 5s --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports: ["46379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s --health-timeout 5s --health-retries 20
+      # Redis 不用 services：services 只支持 image/env/ports/options，无法传 `--requirepass`
+      # （services 的 command 键会被判定为无效工作流）。这里用 docker run 自行拉起。
       rabbitmq:
         image: rabbitmq:3.13-alpine
         env:
@@ -122,6 +118,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      - name: 启动 Redis（带密码）
+        run: |
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
+          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库（应用启动需要表结构）
@@ -196,12 +198,7 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
           --health-interval 10s --health-timeout 5s --health-retries 20
-      redis:
-        image: redis:7-alpine
-        ports: ["46379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s --health-timeout 5s --health-retries 20
+      # 同 contract：Redis 由 docker run 拉起（带密码）
       rabbitmq:
         image: rabbitmq:3.13-alpine
         env:
@@ -213,6 +210,12 @@ jobs:
           --health-interval 15s --health-timeout 10s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: 启动 Redis（带密码）
+        run: |
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
+          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
       - name: 初始化数据库
