@@ -13,12 +13,13 @@ import org.springframework.data.redis.core.ValueOperations;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/** TokenService 单测：JWT 解析与刷新安全分支（BL-TEST-01 覆盖率补齐）。 */
+/** TokenService 单测：JWT 解析、刷新安全分支、生命周期（BL-TEST-01）。 */
 class TokenServiceTest {
 
     private static final SecretKey KEY = Keys.hmacShaKeyFor(
@@ -39,21 +40,16 @@ class TokenServiceTest {
     }
 
     private String token(long userId, String role, long version) {
-        return Jwts.builder()
-            .subject(String.valueOf(userId))
+        return Jwts.builder().subject(String.valueOf(userId))
             .claim("userId", userId).claim("role", role).claim("version", version)
             .issuedAt(new Date()).expiration(new Date(System.currentTimeMillis() + 60000))
             .signWith(KEY).compact();
     }
 
     @Test
-    @DisplayName("parseUserId: 自己签发的 token -> userId")
+    @DisplayName("parseUserId: 合法 token -> userId")
     void parseUserId() {
-        // 用 buildAccessToken 同款算法（避免手工 JWT 与 verifyWith 的算法/键不一致）
-        // 直接用同一 SecretKey 签一个带 subject 的 token，验证 parseUserId 的解析路径
-        String at = token(1001L, "CONSUMER", 1);
-        // 该 token 带 subject，parseUserId 应能读出 userId
-        assertEquals(1001L, service.parseUserId(at));
+        assertEquals(1001L, service.parseUserId(token(1001L, "CONSUMER", 1)));
     }
 
     @Test
@@ -66,6 +62,16 @@ class TokenServiceTest {
     @DisplayName("versionOf: 从 JWT 取版本")
     void versionOf() {
         assertEquals(7L, service.versionOf(token(1001L, "CONSUMER", 7)));
+    }
+
+    @Test
+    @DisplayName("shopIdOf: 从 JWT 取归属店铺；无 claim -> null")
+    void shopIdOf() {
+        String t = Jwts.builder().subject("1001").claim("shopId", 42L)
+            .issuedAt(new Date()).expiration(new Date(System.currentTimeMillis() + 60000))
+            .signWith(KEY).compact();
+        assertEquals(42L, service.shopIdOf(t));
+        assertNull(service.shopIdOf(token(1001L, "CONSUMER", 1)));
     }
 
     @Test
@@ -103,14 +109,42 @@ class TokenServiceTest {
     }
 
     @Test
-    @DisplayName("parseUserIdFromRefresh: 格式非法 -> 401")
-    void parseMalformedRt() {
-        assertThrows(BaseException.class, () -> service.parseUserIdFromRefresh("no-colon"));
+    @DisplayName("refresh: RT 匹配 -> 签发新 AT 并更新 Redis 双键")
+    void refreshSuccess() {
+        when(valueOps.get(anyString())).thenReturn("1001:rt-uuid", "5");
+        String at = service.refresh(1001L, "1001:rt-uuid");
+        assertNotNull(at);
+        verify(valueOps, times(2)).set(anyString(), anyString(), anyLong(), any());
     }
 
     @Test
-    @DisplayName("parseUserIdFromRefresh: 合法格式 -> userId")
-    void parseValidRt() {
+    @DisplayName("parseUserIdFromRefresh: 非法格式 -> 401；合法 -> userId")
+    void parseRefresh() {
+        assertThrows(BaseException.class, () -> service.parseUserIdFromRefresh("no-colon"));
+        assertThrows(BaseException.class, () -> service.parseUserIdFromRefresh("abc:uuid"));
         assertEquals(1001L, service.parseUserIdFromRefresh("1001:uuid"));
+    }
+
+    @Test
+    @DisplayName("logout: 清理四键")
+    void logoutDeletesFourKeys() {
+        service.logout(1001L);
+        verify(redis).delete(argThat((java.util.Collection<String> keys) -> keys.size() == 4));
+    }
+
+    @Test
+    @DisplayName("jwtKeyFrom: 短密钥被拒绝（安全下限）")
+    void jwtKeyFromRejectsShort() {
+        assertThrows(RuntimeException.class, () -> service.jwtKeyFrom("short"));
+    }
+
+    @Test
+    @DisplayName("generateTokenPair: 签发 AT + RT 并写 Redis")
+    void generatePair() {
+        var pair = service.generateTokenPair(1001L, 3L);
+        assertNotNull(pair.accessToken());
+        assertTrue(pair.refreshToken().startsWith("1001:"));
+        verify(redis).execute(any(org.springframework.data.redis.core.script.RedisScript.class),
+            anyList(), any(Object[].class));
     }
 }

@@ -157,4 +157,75 @@ class LoginServiceFlowTest {
             () -> service.login(req("code"), "127.0.0.1"));
         assertEquals(BaseCode.UNAUTHORIZED, ex.getCode());
     }
+
+    @Test
+    @DisplayName("验证码正确（Lua 原子消费返回 1）-> 登录成功")
+    void codeLoginSuccess() {
+        UserPhone up = new UserPhone();
+        up.setUserId(1001L);
+        when(phoneMapper.selectOne(any())).thenReturn(up);
+        when(userMapper.selectById(1001L)).thenReturn(user());
+        LoginRequest r = req("code");
+        r.setCode("123456");
+        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class),
+            anyList(), any(Object[].class))).thenReturn(1L);
+
+        var res = service.login(r, "127.0.0.1");
+
+        assertEquals("at", res.getAccessToken());
+    }
+
+    @Test
+    @DisplayName("验证码错误（Lua 返回 0）-> UNAUTHORIZED + 记失败")
+    void wrongCode() {
+        UserPhone up = new UserPhone();
+        up.setUserId(1001L);
+        when(phoneMapper.selectOne(any())).thenReturn(up);
+        when(userMapper.selectById(1001L)).thenReturn(user());
+        LoginRequest r = req("code");
+        r.setCode("000000");
+        when(redis.execute(any(org.springframework.data.redis.core.script.RedisScript.class),
+            anyList(), any(Object[].class))).thenReturn(0L);
+
+        BaseException ex = assertThrows(BaseException.class,
+            () -> service.login(r, "127.0.0.1"));
+        assertEquals(BaseCode.UNAUTHORIZED, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("changePassword: 用户不存在 -> NOT_FOUND")
+    void changePasswordNoUser() {
+        when(userMapper.selectById(1001L)).thenReturn(null);
+        BaseException ex = assertThrows(BaseException.class,
+            () -> service.changePassword(1001L, "old", "new"));
+        assertEquals(BaseCode.NOT_FOUND, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("changePassword: 原密码错误 -> UNAUTHORIZED")
+    void changePasswordWrongOld() {
+        when(userMapper.selectById(1001L)).thenReturn(user());
+        BaseException ex = assertThrows(BaseException.class,
+            () -> service.changePassword(1001L, "wrong", "new"));
+        assertEquals(BaseCode.UNAUTHORIZED, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("changePassword: 新旧相同 -> INTERNAL_ERROR")
+    void changePasswordSame() {
+        when(userMapper.selectById(1001L)).thenReturn(user());
+        BaseException ex = assertThrows(BaseException.class,
+            () -> service.changePassword(1001L, "pass12345", "pass12345"));
+        assertEquals(BaseCode.INTERNAL_ERROR, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("changePassword: 合法改密 -> 更新哈希 + bump version（改密踢出）")
+    void changePasswordSuccess() {
+        when(userMapper.selectById(1001L)).thenReturn(user());
+        service.changePassword(1001L, "pass12345", "new-pass-123");
+        verify(tokenService).bumpVersion(1001L);
+        verify(userMapper).updateById(org.mockito.ArgumentMatchers.<org.nearslot.auth.entity.User>argThat(u ->
+            encoder.matches("new-pass-123", u.getPassword())));
+    }
 }
