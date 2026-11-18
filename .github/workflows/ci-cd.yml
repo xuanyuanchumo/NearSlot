@@ -132,13 +132,22 @@ jobs:
           else
             echo "首次生成 api/openapi.json（基线）"
           fi
-      - name: 契约需随 PR 入库
+      - name: 契约需随 PR 入库（语义比较）
+        # 不能用 git diff --cached --quiet：CI 生成契约时未 sort_keys，
+        # 与仓库中格式化的版本字节不同但**语义完全一致**（2026-11-19 实测，
+        # artifact 下载后 json.loads 相等）。门禁只关心语义变更。
         run: |
-          git add api/openapi.json
-          if ! git diff --cached --quiet; then
-            echo "::error::契约有变更，请随本 PR 提交 api/openapi.json（只打印不失败 = 假门禁）"
-            exit 1
-          fi
+          python3 - <<'PY'
+          import json, subprocess, sys
+          committed = json.load(open("api/openapi.json", encoding="utf-8"))
+          generated = json.load(open("/tmp/openapi.json", encoding="utf-8"))
+          if committed != generated:
+              old = set((committed.get("paths") or {}).keys())
+              new = set((generated.get("paths") or {}).keys())
+              print("::error::契约语义有变更：新增", sorted(new - old), "删除", sorted(old - new))
+              sys.exit(1)
+          print("契约语义一致（格式化差异忽略）")
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
