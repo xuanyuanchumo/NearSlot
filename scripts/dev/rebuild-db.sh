@@ -4,14 +4,14 @@ M="D:/MySQL/MySQL Server 8.0/bin/mysql"
 cd "D:/Projects/TraeProjects/Studying/NearSlot"
 echo "=== 删库重建（破坏性变更 SOP）==="
 "$M" -uroot -h127.0.0.1 -P3306 -e "DROP DATABASE IF EXISTS nearslot;"
-"$M" -uroot -h127.0.0.1 -P3306 < sql/1_create_database.sql
-"$M" -uroot -h127.0.0.1 -P3306 < sql/2_business.sql
+"$M" -uroot -h127.0.0.1 -P3306 < sql/01_create_database.sql
+"$M" -uroot -h127.0.0.1 -P3306 < sql/02_business.sql
 echo "=== 应用迁移 ==="
 for f in sql/3_*.sql sql/4_*.sql sql/5_*.sql sql/6_*.sql; do
   [ -f "$f" ] && "$M" -uroot -h127.0.0.1 -P3306 nearslot < "$f" 2>/dev/null || true
 done
 # 7 是破坏性改名（直接 CHANGE COLUMN），放在最后
-"$M" -uroot -h127.0.0.1 -P3306 < sql/7_service_staff_generalization.sql >/dev/null 2>&1
+"$M" -uroot -h127.0.0.1 -P3306 < sql/07_service_staff_generalization.sql >/dev/null 2>&1
 echo "=== 种子数据（新列名 service_staff_id）==="
 "$M" -uroot -h127.0.0.1 -P3306 nearslot <<'SQL' 2>/dev/null
 INSERT INTO user (id, nickname, password, level, deleted) VALUES (1001, 'testuser', 'pass12345', 5, 0);

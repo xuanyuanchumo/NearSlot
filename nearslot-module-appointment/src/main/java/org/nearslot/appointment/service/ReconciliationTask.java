@@ -39,26 +39,31 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ReconciliationTask {
 
-    private static final long RECONCILE_INTERVAL_MS = 5 * 60_000L;
-    private static final int BATCH_SIZE = 200;
+
+
     /** 在途保护窗口：延迟阈值 10s + 2s（research/09b §2）。 */
-    public static final long IN_FLIGHT_WINDOW_MS = 12_000L;
+    /** 在途窗口由 `nearslot.appointment.reconcile-in-flight-window-ms` 决定。 */
 
     private final AppointmentOrderMapper orderMapper;
     private final ReconcileLogMapper logMapper;
     private final StringRedisTemplate redis;
+    /** 对账批大小外置到 `nearslot.appointment.reconcile-batch-size`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
     /** 业务指标出口（可选注入，便于单测不依赖 Micrometer）。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
-    @Scheduled(fixedDelay = RECONCILE_INTERVAL_MS)
+    @Scheduled(fixedDelayString = "${nearslot.appointment.reconcile-interval-ms:300000}")
     public void reconcile() {
-        List<AppointmentOrder> pending = orderMapper.selectList(
+        // 用 MP Page 代替手拼 LIMIT；批大小外置到 `nearslot.appointment.reconcile-batch-size`
+        var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<AppointmentOrder>(
+            1, props.getReconcileBatchSize());
+        List<AppointmentOrder> pending = orderMapper.selectPage(page,
             Wrappers.<AppointmentOrder>lambdaQuery()
                 .and(w -> w.isNull(AppointmentOrder::getReconcileStatus)
                            .or().eq(AppointmentOrder::getReconcileStatus,
                                     ReconcileStatus.PENDING.getCode()))
-                .last("LIMIT " + BATCH_SIZE));
+                .orderByAsc(AppointmentOrder::getId)).getRecords();
         if (pending.isEmpty()) return;
 
         int consistent = 0, abnormal = 0, inFlight = 0;
@@ -100,7 +105,7 @@ public class ReconciliationTask {
                 return Verdict.ABNORMAL;
             }
             long traceTs = extractTraceTs(traces);
-            if (System.currentTimeMillis() - traceTs < IN_FLIGHT_WINDOW_MS) {
+            if (System.currentTimeMillis() - traceTs < props.getReconcileInFlightWindowMs()) {
                 return Verdict.IN_FLIGHT;
             }
             markStatus(order.getId(), ReconcileStatus.ABNORMAL);

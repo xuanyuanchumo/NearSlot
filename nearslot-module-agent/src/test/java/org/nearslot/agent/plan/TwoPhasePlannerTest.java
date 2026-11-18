@@ -27,7 +27,7 @@ class TwoPhasePlannerTest {
         shopQuery = mock(ShopRecommendQuery.class);
         orderQuery = mock(OrderQuery.class);
         rankQuery = mock(TechRankQuery.class);
-        planner = new TwoPhasePlanner(slotQuery, shopQuery, orderQuery, rankQuery);
+        planner = new TwoPhasePlanner(new org.nearslot.agent.config.AgentProperties(), slotQuery, shopQuery, orderQuery, rankQuery);
     }
 
     @Test
@@ -75,8 +75,10 @@ class TwoPhasePlannerTest {
     @Test
     @DisplayName("轮次上限约束生效")
     void roundLimit() {
-        assertTrue(planner.withinLimit(TwoPhasePlanner.MAX_TOOL_ROUNDS));
-        assertFalse(planner.withinLimit(TwoPhasePlanner.MAX_TOOL_ROUNDS + 1));
+        // 上限来自 `nearslot.agent.max-tool-rounds`，测试按默认值断言
+        int limit = new org.nearslot.agent.config.AgentProperties().getMaxToolRounds();
+        assertTrue(planner.withinLimit(limit));
+        assertFalse(planner.withinLimit(limit + 1));
     }
 
     @Test

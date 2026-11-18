@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.nearslot.auth.service.TokenService;
 import org.nearslot.common.context.UserHolder;
 import org.springframework.stereotype.Component;
-import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
 /**
  * 鉴权 + 上下文装配（ADR-002）。
@@ -25,7 +25,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RefreshTokenInterceptor implements HandlerInterceptor {
+public class RefreshTokenInterceptor implements AsyncHandlerInterceptor {
     private final TokenService tokenService;
 
     @Override
@@ -67,5 +67,21 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
         UserHolder.clear();  // 防 Tomcat 线程复用污染
+    }
+
+    /**
+     * 异步请求（SseEmitter）的清理钩子。
+     *
+     * **安全红线（2026-11-17 审计修复，Major）**：
+     * 对异步请求，Spring 调的是 afterConcurrentHandlingStarted，**不调** afterCompletion，
+     * 因此 SSE（AI 助手 /chat）结束后 UserHolder 从不清理；
+     * Tomcat 线程复用时，下一个请求会在 RefreshTokenInterceptor 之前读到
+     * 上一个用户的 userId/role（匿名请求被当成前一个用户）。
+     * 这是越权与串号隐患，必须在异步起点显式清理。
+     */
+    @Override
+    public void afterConcurrentHandlingStarted(HttpServletRequest request, HttpServletResponse response,
+                                               Object handler) {
+        UserHolder.clear();
     }
 }

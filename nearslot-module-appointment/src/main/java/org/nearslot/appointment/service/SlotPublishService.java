@@ -40,6 +40,8 @@ public class SlotPublishService {
     private final ReminderService reminderService;
     private final org.nearslot.common.api.StaffSkillQuery staffSkillQuery;
     private final org.nearslot.framework.cache.CacheManager cacheManager;
+    /** 时段查询上限外置到 `nearslot.appointment.slot-query-limit`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /** 发布时段（幂等）。 */
     @Transactional(rollbackFor = Exception.class)
@@ -105,18 +107,36 @@ public class SlotPublishService {
             allowedStaff = staffSkillQuery.staffIdsByItem(serviceItemId);
             if (allowedStaff == null || allowedStaff.isEmpty()) return java.util.List.of();
         }
+        // **2026-11-17 修正（正确性缺陷）**：此前先 `LIMIT 100` 取回再在内存里按日期过滤——
+        // 店铺历史时段一旦超过 100 条，查未来日期的页面会**稳定返回空**（被更早的 100 条占满）。
+        // 现在把日期条件下推到 SQL，并用 MP Page 限制返回量。
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<TimeSlot>lambdaQuery()
             .eq(TimeSlot::getShopId, shopId)
-            .eq(TimeSlot::getStatus, 1)
-            .orderByAsc(TimeSlot::getStartsAt)
-            .last("LIMIT 100");
-        java.util.List<TimeSlot> slots = timeSlotMapper.selectList(q);
+            .eq(TimeSlot::getStatus, 1);
+        if (date != null && !date.isBlank()) {
+            java.time.LocalDate d = java.time.LocalDate.parse(date);
+            q.ge(TimeSlot::getStartsAt, d.atStartOfDay())
+             .lt(TimeSlot::getStartsAt, d.plusDays(1).atStartOfDay());
+        }
+        if (allowedStaff != null) {
+            q.in(TimeSlot::getServiceStaffId, allowedStaff);
+        }
+        q.orderByAsc(TimeSlot::getStartsAt);
+        java.util.List<TimeSlot> slots = timeSlotMapper.selectList(
+            q.last("LIMIT " + props.getSlotQueryLimit()));
+        // 批量取余量，避免循环内单键 GET（N+1 往返）
+        java.util.List<String> stockKeys = slots.stream()
+            .map(s -> RedisConstants.SLOT_STOCK + s.getId()).toList();
+        java.util.List<String> stocks = stockKeys.isEmpty() ? java.util.List.of()
+            : redis.opsForValue().multiGet(stockKeys);
         java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
-        for (TimeSlot s : slots) {
-            if (date != null && s.getStartsAt() != null
-                && !s.getStartsAt().toLocalDate().toString().equals(date)) continue;
+        for (int i = 0; i < slots.size(); i++) {
+            TimeSlot s = slots.get(i);
+            // 防御性二次校验：SQL 已用 in(...) 过滤，但技师技能可能在查询后被解除绑定，
+            // 或上层传入的 allowedStaff 来自缓存。这里再拦一次，代价可忽略，
+            // 避免"用户选了肩颈推拿却排给只会美甲的技师"（business-domain.md §3.2）。
             if (allowedStaff != null && !allowedStaff.contains(s.getServiceStaffId())) continue;
-            String stock = redis.opsForValue().get(RedisConstants.SLOT_STOCK + s.getId());
+            String stock = stocks == null || i >= stocks.size() ? null : stocks.get(i);
             java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", String.valueOf(s.getId()));       // 字符串防精度丢失（ADR-012）
             m.put("shopId", String.valueOf(s.getShopId()));
@@ -129,6 +149,20 @@ public class SlotPublishService {
             out.add(m);
         }
         return out;
+    }
+
+    /**
+     * 取时段归属店铺（鉴权用）。
+     *
+     * 为什么单独暴露：关闭时段的请求体里没有 shopId，
+     * 控制器无法自行判断归属，必须先把 slotId 翻译成 shopId 再做闸。
+     *
+     * @throws org.nearslot.common.exception.BaseException 时段不存在时 404
+     */
+    public Long shopIdOfSlot(Long slotId) {
+        TimeSlot slot = timeSlotMapper.selectById(slotId);
+        if (slot == null) throw new BaseException(BaseCode.NOT_FOUND, "时段不存在 id=" + slotId);
+        return slot.getShopId();
     }
 
     /** 关闭时段：状态置 2 + 删余量键 + 广播。 */

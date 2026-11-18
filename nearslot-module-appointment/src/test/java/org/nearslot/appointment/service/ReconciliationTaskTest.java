@@ -37,7 +37,8 @@ class ReconciliationTaskTest {
         HashOperations<String, Object, Object> hashOps = mock(HashOperations.class);
         when(redis.opsForHash()).thenReturn(hashOps);
         when(hashOps.entries(any())).thenReturn(Map.of());
-        task = new ReconciliationTask(orderMapper, logMapper, redis);
+        task = new ReconciliationTask(orderMapper, logMapper, redis,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     private AppointmentOrder order() {

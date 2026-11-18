@@ -18,8 +18,9 @@ public class FrameworkBeansConfig {
 
     @Bean
     public CacheManager cacheManager(StringRedisTemplate redis,
-                                     com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        return new CacheManager(redis, mapper);
+                                     com.fasterxml.jackson.databind.ObjectMapper mapper,
+                                     org.nearslot.framework.config.properties.FrameworkProperties props) {
+        return new CacheManager(redis, mapper, props);
     }
 
     @Bean

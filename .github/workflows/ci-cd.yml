@@ -1,65 +1,156 @@
-# NearSlot CI 五 job 骨架（deployment/guide.md §4；G0 落地，Phase 5 补全镜像/发布）
+# NearSlot CI（G0 治理门禁 → G4 测试门禁）
+#
+# 2026-11-18 修复（首次推送后实测暴露）：
+# 1. 路径全部改为**仓库根相对**：原工作流写的是 `NearSlot/docs/**`、`cd NearSlot`，
+#    那是"父目录为仓库根"的假设；实际仓库根就是 NearSlot 本身 → 所有 job 必然找不到文件。
+# 2. 补 `permissions: pull-requests: read`：dorny/paths-filter 在 PR 上读变更文件列表需要该权限，
+#    缺失时报 "Resource not accessible by integration"，`changes` job 直接失败 → 后续全部 skipped。
+#    这意味着**该流水线此前从未真正运行过**（仓库无 remote，pull_request 事件不可能触发）。
+# 3. contract / integration 两个 job 需要真实中间件：改为 GitHub Actions `services` 容器，
+#    并对空库执行 sql/01..13（幂等脚本，ADR-032）。
 name: nearslot-ci
+
 on:
   push: { branches: [main, develop] }
   pull_request: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  MYSQL_HOST: 127.0.0.1
+  MYSQL_PORT: "43306"
+  MYSQL_USER: nearslot
+  MYSQL_PASSWORD: ci-mysql-pass
+  MYSQL_DATABASE: nearslot
+  REDIS_HOST: 127.0.0.1
+  # 需要密码：Redisson starter 会无条件 setPassword，若 Redis 未设密码则报
+  # "ERR AUTH <password> called without any password configured"。
+  REDIS_PASSWORD: ci-redis-pass
+  RABBITMQ_HOST: 127.0.0.1
+  RABBITMQ_USER: nearslot
+  RABBITMQ_PASSWORD: ci-rabbit-pass
+  JWT_SECRET: ci-jwt-secret-at-least-32-bytes-long-0123456789
+
+# 说明：docs/ 是**独立的私有 git 仓库**（xuanyuanchumo/NearSlot-docs），
+# 不在本仓库内（.gitignore 第 58 行），因此本流水线不再承担文档门禁 ——
+# 文档校验由 .husky/pre-commit 在本地执行；文档仓库独立 CI 见 backlog BL-PROC-06。
 jobs:
-  changes:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      docs_only: ${{ steps.filter.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21', cache: maven }
+      - name: 源码完整性门禁（防 .gitignore 误伤 Java 包路径）
+        run: |
+          # 2026-11-18 实测事故：.gitignore 里未锚定的 `org/` 命中了 src/main/java/org/，
+          # 导致规则生效后新增的 14 个源文件**从未入库**，本地能编译、CI 直接失败。
+          # 这里把"源码是否被忽略"变成门禁：只要有 src 下的 .java 被忽略就失败。
+          ignored=$(git status --ignored --porcelain=v1 | grep -E '^!! .*/src/.*\.java$' || true)
+          if [ -n "$ignored" ]; then
+            echo "::error::以下源码被 .gitignore 忽略，不会进入仓库（CI/他人无法编译）："
+            echo "$ignored"
+            exit 1
+          fi
+          echo "源码完整性 OK：src 下没有 .java 被忽略"
+      - name: 编译 + 单测（排除 integration 标签）
+        run: mvn -B compile test -DexcludedGroups=integration
+      - name: 覆盖率门槛（G4：行覆盖 ≥ 80%）
+        run: |
+          python3 - <<'PY'
+          import csv, glob, os, sys
+          tot=[0,0]; br=[0,0]; rows=[]
+          for f in glob.glob('*/target/site/jacoco/jacoco.csv'):
+              m=f.split(os.sep)[0]; lc=lm=bc=bm=0
+              with open(f, encoding='utf-8') as fh:
+                  for r in csv.DictReader(fh):
+                      lc+=int(r['LINE_COVERED']); lm+=int(r['LINE_MISSED'])
+                      bc+=int(r['BRANCH_COVERED']); bm+=int(r['BRANCH_MISSED'])
+              tot[0]+=lc; tot[1]+=lc+lm; br[0]+=bc; br[1]+=bc+bm
+              rows.append((m, lc, lc+lm))
+          for m, c, t in rows:
+              print(f"{m:30s} {0 if t==0 else round(100*c/t,1)}%")
+          line = 0 if tot[1]==0 else round(100*tot[0]/tot[1],1)
+          print(f"合计行覆盖 {line}% ({tot[0]}/{tot[1]})")
+          THRESHOLD = 80.0
+          if line < THRESHOLD:
+              print(f"::error::行覆盖率 {line}% 低于 G4 门槛 {THRESHOLD}%")
+              sys.exit(1)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
+              s.write(f"## 覆盖率\n\n行覆盖 **{line}%**（{tot[0]}/{tot[1]}）\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          filters: |
-            docs_only:
-              - 'NearSlot/docs/**'
-              - '**/*.md'
-              - '!NearSlot/pom.xml'
-              - '!NearSlot/**/src/**'
-  docs:
-    needs: changes
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - run: python NearSlot/scripts/docs/check_docs.py NearSlot/docs --repo-root .
-      - name: 成熟库优先检查（C-ARCH-06）
-        run: bash NearSlot/scripts/dev/check-wheels.sh
-  # 契约门禁（ADR-018）：生成 openapi.json 并检测破坏性变更
+          name: jacoco-reports
+          path: '*/target/site/jacoco/'
+          retention-days: 7
+
+  # 契约门禁（ADR-018）：起应用生成 OpenAPI，检测破坏性变更
   contract:
-    needs: [docs]
-    if: needs.changes.outputs.docs_only != 'true'
+    needs: [build]
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pass
+          MYSQL_DATABASE: nearslot
+          MYSQL_USER: nearslot
+          MYSQL_PASSWORD: ci-mysql-pass
+        ports: ["43306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+      # Redis 不用 services：services 只支持 image/env/ports/options，无法传 `--requirepass`
+      # （services 的 command 键会被判定为无效工作流）。这里用 docker run 自行拉起。
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: nearslot
+          RABBITMQ_DEFAULT_PASS: ci-rabbit-pass
+        ports: ["45672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 15s --health-timeout 10s --health-retries 20
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
-      - name: 启动应用生成 OpenAPI 契约
+      - name: 启动 Redis（带密码）
         run: |
-          cd NearSlot
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
+          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21', cache: maven }
+      - name: 初始化数据库（应用启动需要表结构）
+        run: |
+          # 用 root 执行迁移：sql/01 会额外建 nearslot_ds0/ds1（分片库，BL-ORD-01 预留），
+          # 业务账号只有 nearslot 库权限，用它执行会 `ERROR 1044 Access denied ... nearslot_ds0`。
+          # 与本地验证保持一致（本地也用 root 初始化）。
+          for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
+            echo "apply $f"
+            mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
+          done
+      - name: 启动应用生成 OpenAPI
+        run: |
           mvn -B -q -DskipTests package
           java -jar nearslot-app/target/nearslot-app-*.jar \
-            --spring.profiles.active=verify --server.port=48081 > /tmp/app.log 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:48081/v3/api-docs -o /tmp/openapi.json; then break; fi
-            sleep 2
-          done
+            --spring.profiles.active=verify > /tmp/app.log 2>&1 &
+          # 有界等待：最多 180s，避免 CI 卡死；失败时下方打印应用日志
+          timeout 180 bash -c 'until curl -sf http://localhost:8081/v3/api-docs -o /tmp/openapi.json; do sleep 2; done' || true
+          if [ ! -s /tmp/openapi.json ]; then echo "::error::应用未启动，无法生成契约"; tail -50 /tmp/app.log; exit 1; fi
           mkdir -p api
-          python -c "import json;d=json.load(open('/tmp/openapi.json'));json.dump(d,open('api/openapi.json','w'),ensure_ascii=False,indent=2,sort_keys=True)"
+          python3 -c "import json;d=json.load(open('/tmp/openapi.json'));json.dump(d,open('api/openapi.json','w'),ensure_ascii=False,indent=2,sort_keys=True)"
       - name: 破坏性变更检测
         run: |
-          cd NearSlot
-          if git diff --quiet -- api/openapi.json; then
-            echo "契约无变更"
-          else
-            python - <<'PY'
+          if git cat-file -e HEAD:api/openapi.json 2>/dev/null; then
+            python3 - <<'PY'
           import json, subprocess, sys
-          old = json.loads(subprocess.run(['git','show','HEAD:NearSlot/api/openapi.json'],
+          old = json.loads(subprocess.run(['git','show','HEAD:api/openapi.json'],
                                           capture_output=True, text=True).stdout or '{}')
           new = json.load(open('api/openapi.json'))
           breaking = []
@@ -76,67 +167,80 @@ jobs:
               sys.exit(1)
           print("契约变更非破坏性（仅新增/描述调整）")
           PY
+          else
+            echo "首次生成 api/openapi.json（基线）"
           fi
-      - name: 契约入库
+      - name: 契约需随 PR 入库
         run: |
-          cd NearSlot
           git add api/openapi.json
-          git diff --cached --quiet || echo "::notice::契约已更新，请随 PR 提交 api/openapi.json"
-  ci:
-    needs: [changes, docs]
-    if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
-      - run: cd NearSlot && mvn -B compile && mvn -B test -DexcludedGroups=integration
-      # 覆盖率报告（JaCoCo 已在根 pom 启用 prepare-agent + report）
-      - name: 覆盖率汇总
-        run: |
-          cd NearSlot
-          python3 - <<'PY'
-          import csv, glob, os
-          tot=[0,0]; br=[0,0]; rows=[]
-          for f in glob.glob('*/target/site/jacoco/jacoco.csv'):
-              m=f.split(os.sep)[0]; lc=lm=bc=bm=0
-              with open(f, encoding='utf-8') as fh:
-                  for r in csv.DictReader(fh):
-                      lc+=int(r['LINE_COVERED']); lm+=int(r['LINE_MISSED'])
-                      bc+=int(r['BRANCH_COVERED']); bm+=int(r['BRANCH_MISSED'])
-              tot[0]+=lc; tot[1]+=lc+lm; br[0]+=bc; br[1]+=bc+bm
-              rows.append((m, lc, lc+lm))
-          for m, c, t in rows:
-              print(f"{m:30s} {0 if t==0 else round(100*c/t,1)}%")
-          line = 0 if tot[1]==0 else round(100*tot[0]/tot[1],1)
-          print(f"合计行覆盖 {line}% ({tot[0]}/{tot[1]})")
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
-              s.write(f"## 覆盖率\n\n行覆盖 **{line}%**（{tot[0]}/{tot[1]}）\n")
-          PY
+          if git diff --cached --quiet; then
+            echo "契约无变更"
+          else
+            echo "::warning::契约有变更，请随本 PR 提交 api/openapi.json"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
-        with:
-          name: jacoco-reports
-          path: NearSlot/*/target/site/jacoco/
-          retention-days: 7
+        with: { name: app-log-contract, path: /tmp/app.log, retention-days: 3 }
+
   integration:
-    needs: ci
+    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pass
+          MYSQL_DATABASE: nearslot
+          MYSQL_USER: nearslot
+          MYSQL_PASSWORD: ci-mysql-pass
+        ports: ["43306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pass"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+      # 同 contract：Redis 由 docker run 拉起（带密码）
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: nearslot
+          RABBITMQ_DEFAULT_PASS: ci-rabbit-pass
+        ports: ["45672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 15s --health-timeout 10s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: 启动 Redis（带密码）
+        run: |
+          docker run -d --name ci-redis -p 46379:6379 redis:7-alpine \
+            redis-server --requirepass "$REDIS_PASSWORD"
+          timeout 60 bash -c 'until docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do sleep 1; done'
+          docker exec ci-redis redis-cli -a "$REDIS_PASSWORD" ping
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
-      - run: cd NearSlot && mvn -B verify -Dgroups=integration
+        with: { distribution: temurin, java-version: '21', cache: maven }
+      - name: 初始化数据库
+        run: |
+          # 同 contract job：统一用 root 初始化（sql/01 需要建分片库）
+          for f in $(find sql -maxdepth 1 -name '*.sql' | sort); do
+            echo "apply $f"; mysql -h127.0.0.1 -P43306 -uroot -pci-root-pass < "$f"
+          done
+      - name: 集成测试（真实 MySQL/Redis/RabbitMQ）
+        run: |
+          mvn -B verify -Dgroups=integration \
+            -Dnearslot.test.redis.host=127.0.0.1 \
+            -Dnearslot.test.redis.port=46379 \
+            -Dnearslot.test.redis.password=ci-redis-pass
+
   build-image:
-    needs: [ci, integration]
+    needs: [build, integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: echo "镜像构建推送占位（Phase 5 接入 ACR，禁本地 build）"
+      - run: echo "镜像构建占位（Phase 5 接入 ACR；BL-DEP-01）"
+
   notify:
-    needs: [docs, ci, build-image]
+    needs: [build, contract]
     if: always()
     runs-on: ubuntu-latest
     steps:

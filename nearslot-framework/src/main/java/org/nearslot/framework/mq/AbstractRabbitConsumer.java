@@ -1,17 +1,32 @@
 package org.nearslot.framework.mq;
 
+import org.nearslot.framework.config.properties.FrameworkProperties;
 import org.springframework.amqp.core.Message;
 
 /**
  * RabbitMQ 消费模板（ADR-014）：统一 幂等 → 业务 → 失败登记 三段式。
  * 与 PickNear 一致：事务提交后发送、手动 ack、x-retry-count 重试、超限进死信。
  * 投递延迟门：消息头 producerTime 超过阈值即视为过期，回补并丢弃。
+ *
+ * **2026-11-18 治理**：重试次数与延迟门阈值改为从
+ * {@link FrameworkProperties}（`nearslot.framework.mq-*`）读取，
+ * 不再写死 3 / 10000 —— 这两个值直接决定故障恢复速度与消息放大倍数，
+ * 不同环境（本地调试要快、生产要稳）合理取值不同。
+ *
+ * 消息头名称（producerTime / x-retry-count）保持常量：
+ * 它们是**跨服务协议**的一部分，改了要同步改生产方与死信处理，不属于调参。
  */
 public abstract class AbstractRabbitConsumer<T> {
-    protected static final long MESSAGE_DELAY_MS = 10_000L;
+
     protected static final String HEADER_PRODUCER_TIME = "producerTime";
     protected static final String HEADER_RETRY = "x-retry-count";
-    protected static final int MAX_RETRY = 3;
+
+    /** 基础设施调优参数（由子类通过构造器传入）。 */
+    protected final FrameworkProperties frameworkProperties;
+
+    protected AbstractRabbitConsumer(FrameworkProperties frameworkProperties) {
+        this.frameworkProperties = frameworkProperties;
+    }
 
     /** 解析消息体。 */
     protected abstract T convert(Message message);
@@ -25,7 +40,8 @@ public abstract class AbstractRabbitConsumer<T> {
     public void handle(Message message) {
         T payload = convert(message);
         Long producerTime = message.getMessageProperties().getHeader(HEADER_PRODUCER_TIME);
-        if (producerTime != null && System.currentTimeMillis() - producerTime > MESSAGE_DELAY_MS) {
+        if (producerTime != null
+                && System.currentTimeMillis() - producerTime > frameworkProperties.getMqMessageDelayMs()) {
             safeFailure(payload, new IllegalStateException("message delayed"));
             return;
         }

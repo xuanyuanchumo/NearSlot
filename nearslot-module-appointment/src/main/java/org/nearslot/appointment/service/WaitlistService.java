@@ -36,9 +36,11 @@ public class WaitlistService {
     public static final int STATUS_SUBSCRIBED = 1;
     public static final int STATUS_SUCCESS = 2;
 
-    private static final long TTL_SECONDS = 86400L;
+    /** 订阅 TTL 由 `nearslot.appointment.subscription-ttl-seconds` 决定。 */
 
     private final StringRedisTemplate redis;
+    /** 订阅 TTL 外置到 `nearslot.appointment.subscription-ttl-seconds`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
     private final org.nearslot.appointment.mapper.TimeSlotMapper timeSlotMapper;
     /** 等级校验走 common 接口（C-ARCH-01，不直接依赖 auth）。 */
     private final org.nearslot.common.api.UserLevelQuery userLevelQuery;
@@ -71,21 +73,21 @@ public class WaitlistService {
             redis.opsForSet().isMember(RedisConstants.SLOT_USER + slotId, uid));
         if (purchased) {
             redis.opsForHash().put(statusKey, uid, String.valueOf(STATUS_SUCCESS));
-            redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+            redis.expire(statusKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
             log.info("用户已预约该时段，直接标记 SUCCESS slotId={} userId={}", slotId, userId);
             return -1;
         }
 
         // 2) Set 幂等加入
         Long added = redis.opsForSet().add(setKey, uid);
-        redis.expire(setKey, TTL_SECONDS, TimeUnit.SECONDS);
+        redis.expire(setKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
 
         // 3) 仅首次加入才写 ZSet（保持既有排序不被扰动）
         if (Objects.nonNull(added) && added > 0) {
             redis.opsForZSet().add(zsetKey, uid, (double) System.currentTimeMillis());
-            redis.expire(zsetKey, TTL_SECONDS, TimeUnit.SECONDS);
+            redis.expire(zsetKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
         } else {
-            redis.expire(zsetKey, TTL_SECONDS, TimeUnit.SECONDS);
+            redis.expire(zsetKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
         }
 
         // 4) 状态置 SUBSCRIBED，但不降级已 SUCCESS 的用户
@@ -93,7 +95,7 @@ public class WaitlistService {
         if (prev == null || !String.valueOf(STATUS_SUCCESS).equals(String.valueOf(prev))) {
             redis.opsForHash().put(statusKey, uid, String.valueOf(STATUS_SUBSCRIBED));
         }
-        redis.expire(statusKey, TTL_SECONDS, TimeUnit.SECONDS);
+        redis.expire(statusKey, props.getSubscriptionTtlSeconds(), TimeUnit.SECONDS);
 
         Long rank = redis.opsForZSet().rank(zsetKey, uid);
         return rank == null ? -1 : rank + 1;

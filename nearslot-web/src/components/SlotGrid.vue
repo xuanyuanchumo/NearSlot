@@ -8,13 +8,12 @@
  * - 响应式：容器查询决定列数（移动 3 列 / 平板 5 列 / 桌面 7 列）；
  * - 前端不做并发裁决：状态完全来自服务端，本地不占位。
  */
-import type { TimeSlot } from "@/types/api";
-import { SLOT_STATUS_TEXT } from "@/types/api";
-import { formatCents, formatTimeInZone } from "@/utils/format";
+import type { SlotView } from "@/api/shop";
+import { formatTimeInZone } from "@/utils/format";
 
 interface Props {
-  /** 当前日期的时段列表 */
-  slots: TimeSlot[];
+  /** 当前日期的时段列表（后端字段投影：含 remaining 实时余量，无 priceCents/status） */
+  slots: SlotView[];
   /** 时区（IANA），用于渲染墙钟时间 */
   tzId: string;
   /** 已选中的时段 id */
@@ -29,22 +28,28 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: "select", slot: TimeSlot): void;
-  (e: "unselect", slot: TimeSlot): void;
+  (e: "select", slot: SlotView): void;
+  (e: "unselect", slot: SlotView): void;
 }>();
 
-/** 是否可点：只有 available 且整体未禁用 */
-function isClickable(slot: TimeSlot): boolean {
-  return !props.disabled && slot.status === "available";
+/**
+ * 是否可点：余量 > 0 且整体未禁用。
+ *
+ * 2026-11-17 审计修复：后端时段投影**没有 status 字段**（只有 remaining 余量），
+ * 原实现读 slot.status 恒为 undefined，导致所有格子都被判成不可点 ——
+ * 时段网格整块点不动，抢约入口等于不存在。
+ */
+function isClickable(slot: SlotView): boolean {
+  return !props.disabled && slot.remaining > 0;
 }
 
-/** 时段展示角标文案 */
-function statusLabel(slot: TimeSlot): string {
-  if (slot.status === "available") return formatCents(slot.priceCents);
-  return slot.reason || SLOT_STATUS_TEXT[slot.status];
+/** 时段展示角标文案：余量为主，无余量时给出明确原因 */
+function statusLabel(slot: SlotView): string {
+  if (slot.remaining > 0) return `余 ${slot.remaining}`;
+  return "已约满";
 }
 
-function handleClick(slot: TimeSlot): void {
+function handleClick(slot: SlotView): void {
   if (props.selectedId === slot.id) {
     emit("unselect", slot);
     return;
@@ -90,7 +95,10 @@ function columnsPerRow(): number {
         :key="slot.id"
         type="button"
         class="ns-slot"
-        :class="[`is-${slot.status}`, { 'is-selected': selectedId === slot.id }]"
+        :class="[
+          isClickable(slot) ? 'is-available' : 'is-booked',
+          { 'is-selected': selectedId === slot.id },
+        ]"
         role="radio"
         :aria-checked="selectedId === slot.id"
         :aria-disabled="!isClickable(slot)"

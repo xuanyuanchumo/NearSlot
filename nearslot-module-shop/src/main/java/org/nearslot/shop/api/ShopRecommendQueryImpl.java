@@ -7,7 +7,6 @@ import org.nearslot.shop.service.ShopService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Map;
 
 /** 服务商推荐/检索实现（薄封装 ShopService）。 */
 @Service
@@ -21,15 +20,17 @@ public class ShopRecommendQueryImpl implements ShopRecommendQuery {
         return shopService.searchNearby(x, y, km).stream().map(this::toView).toList();
     }
 
+    /**
+     * 分页查询（ShopService 已返回强类型 PageResult，无需再拆 Map）。
+     *
+     * 此前这里是 `Map<String,Object> res = ...; res.get("items")` + instanceof 过滤，
+     * 属于"类型信息在服务层丢失、调用方再猜回来"的反模式：
+     * 字段名写错只会得到空列表而不会编译失败。改强类型后这类错误编译期即可发现。
+     */
     @Override
-    @SuppressWarnings("unchecked")
     public List<ShopView> page(int page, int size, Long typeId) {
-        Map<String, Object> res = shopService.page(page, size, typeId);
-        Object items = res.get("items");
-        if (!(items instanceof List<?> list)) return List.of();
-        return list.stream()
-            .filter(Shop.class::isInstance)
-            .map(e -> toView((Shop) e))
+        return shopService.page(page, size, typeId).items().stream()
+            .map(this::toView)
             .toList();
     }
 

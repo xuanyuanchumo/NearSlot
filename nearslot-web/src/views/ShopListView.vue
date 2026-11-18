@@ -37,14 +37,14 @@ async function loadShops(reset = false): Promise<void> {
   }
 
   try {
-    const page = await fetchShops({
-      cursor: reset ? undefined : (cursor.value ?? undefined),
-      limit: 12,
-      keyword: keyword.value || undefined,
-    });
+    // 后端是 page/size 偏移分页（GET /shops?page&size&typeId），不是游标分页。
+    // 2026-11-17 审计修复：此前按 {cursor, limit} 请求、按 {cursor, hasMore} 解析，
+    // 后端完全不认这两个参数，page.items 也是 undefined —— 首页列表恒空。
+    const nextPage = reset ? 1 : (cursor.value ? Number(cursor.value) + 1 : 2);
+    const page = await fetchShops({ page: nextPage, size: 12 });
     shops.value = reset ? page.items : shops.value.concat(page.items);
-    cursor.value = page.cursor ?? null;
-    hasMore.value = page.hasMore ?? Boolean(page.cursor);
+    cursor.value = String(nextPage);
+    hasMore.value = shops.value.length < page.total;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "加载服务商列表失败";
     if (!reset) ElMessage.error(errorMessage.value);

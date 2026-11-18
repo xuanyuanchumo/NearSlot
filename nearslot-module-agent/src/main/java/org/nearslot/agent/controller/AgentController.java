@@ -36,6 +36,8 @@ public class AgentController {
     private final CommandGuard guard;
     private final ConfirmTokenService confirmTokenService;
     private final TwoPhasePlanner planner;
+    /** 确认令牌 TTL 外置到 `nearslot.agent.confirm-token-ttl-seconds`。 */
+    private final org.nearslot.agent.config.AgentProperties agentProperties;
 
     @Operation(summary = "流式对话", description = "SSE：meta/plan/progress/confirm/error 五类事件")
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -61,7 +63,7 @@ public class AgentController {
                 String token = confirmTokenService.issue(userId, String.valueOf(input));
                 emitter.send(SseEvent.confirm(seq.incrementAndGet(), token,
                     BaseCode.AGENT_NEED_CONFIRM.getMessage() + "：" + input,
-                    ConfirmTokenService.TTL_SECONDS));
+                    agentProperties.getConfirmTokenTtlSeconds()));
                 emitter.complete();
                 return emitter;
             }

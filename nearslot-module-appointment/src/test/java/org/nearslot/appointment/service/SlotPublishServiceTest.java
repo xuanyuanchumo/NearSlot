@@ -58,7 +58,8 @@ class SlotPublishServiceTest {
         reminderService = mock(ReminderService.class);
         staffSkillQuery = mock(StaffSkillQuery.class);
         service = new SlotPublishService(slotMapper, redis, publisher, lockTemplate,
-            reminderService, staffSkillQuery, cacheManager);
+            reminderService, staffSkillQuery, cacheManager,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     // ---------- 发布校验 ----------
@@ -156,7 +157,8 @@ class SlotPublishServiceTest {
         s.setId(9L); s.setShopId(1L); s.setServiceStaffId(2001L);
         s.setStartsAt(START); s.setEndsAt(END); s.setCapacity(5); s.setStatus(1);
         when(slotMapper.selectList(any())).thenReturn(List.of(s));
-        when(valueOps.get(anyString())).thenReturn(null);
+        // listAvailable 已改为 multiGet 批量取余量（避免循环内 N+1），桩要对齐
+        when(valueOps.multiGet(anyList())).thenReturn(java.util.List.of());
 
         var out = service.listAvailable(1L, null, null);
         assertEquals(5, out.get(0).get("remaining"));

@@ -24,8 +24,9 @@ import java.util.List;
 public class TwoPhasePlanner {
 
     /** 单次对话允许的最大工具执行轮次（research/04 实证值）。 */
-    public static final int MAX_TOOL_ROUNDS = 5;
+    /** 最大工具轮数外置到 `nearslot.agent.max-tool-rounds`（防 token 成本失控）。 */
 
+    private final org.nearslot.agent.config.AgentProperties props;
     private final SlotAvailabilityQuery slotAvailabilityQuery;
     private final ShopRecommendQuery shopRecommendQuery;
     private final OrderQuery orderQuery;
@@ -55,7 +56,7 @@ public class TwoPhasePlanner {
         if (asksOrder) steps.add(new PlanStep(i++, "queryMyAppointments", "查询我的预约"));
         if (asksRank) steps.add(new PlanStep(i++, "topServiceStaff", "查询热门服务者"));
 
-        if (steps.size() > MAX_TOOL_ROUNDS) steps = steps.subList(0, MAX_TOOL_ROUNDS);
+        if (steps.size() > props.getMaxToolRounds()) steps = steps.subList(0, props.getMaxToolRounds());
         log.debug("生成计划 steps={}", steps.size());
         return new Plan(steps);
     }
@@ -97,5 +98,5 @@ public class TwoPhasePlanner {
         }
     }
 
-    public boolean withinLimit(int rounds) { return rounds <= MAX_TOOL_ROUNDS; }
+    public boolean withinLimit(int rounds) { return rounds <= props.getMaxToolRounds(); }
 }

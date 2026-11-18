@@ -61,6 +61,16 @@ class AppointmentLuaIntegrationTest {
         if (keys != null && !keys.isEmpty()) redis.delete(keys);
     }
 
+    /**
+     * 测试用「未来」起始时间：当前时间 + 7 天，向下取整到小时。
+     *
+     * 为什么不能用固定常量：Lua 在 2026-11-17 审计中补上了**时间闸**
+     * （未开始 10002 / 已结束 10003），原先写死的 1_700_000_000_000L（2023-11）
+     * 会被正确拒绝，导致「并发抢约恰好 1 成功」这类用例全部失败。
+     */
+    private static final long FUTURE_START_MS =
+        ((System.currentTimeMillis() + 7L * 24 * 3600 * 1000) / 3_600_000L) * 3_600_000L;
+
     private void seedStock(long slotId, int qty) {
         redis.opsForValue().set(RedisConstants.SLOT_STOCK + slotId, String.valueOf(qty));
     }
@@ -70,7 +80,7 @@ class AppointmentLuaIntegrationTest {
     void concurrentBook_onlyOneSucceeds() throws Exception {
         long slotId = 1001L, techId = 2001L;
         seedStock(slotId, 1);
-        long start = 1_700_000_000_000L, end = start + 3_600_000L;
+        long start = FUTURE_START_MS, end = start + 3_600_000L;
 
         int threads = 100;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -85,7 +95,7 @@ class AppointmentLuaIntegrationTest {
             futures.add(pool.submit(() -> {
                 ready.countDown();
                 try { go.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                BookResult r = luaService.book(uid, slotId, techId, start, end, uid * 10, uid * 10 + 1);
+                BookResult r = luaService.book(uid, slotId, techId, start, end, uid * 10, uid * 10 + 1, 1);
                 if (r.success()) success.incrementAndGet();
                 else if (r.getCode() == BaseCode.LUA_NO_STOCK.getCode()) noStock.incrementAndGet();
             }));
@@ -106,10 +116,10 @@ class AppointmentLuaIntegrationTest {
     void duplicateUser_blocked() {
         long slotId = 1002L, techId = 2002L, uid = 50_001L;
         seedStock(slotId, 5);
-        long s = 1_700_000_000_000L, e = s + 3_600_000L;
+        long s = FUTURE_START_MS, e = s + 3_600_000L;
 
-        assertTrue(luaService.book(uid, slotId, techId, s, e, 1, 2).success());
-        BookResult second = luaService.book(uid, slotId, techId, s, e, 3, 4);
+        assertTrue(luaService.book(uid, slotId, techId, s, e, 1, 2, 5).success());
+        BookResult second = luaService.book(uid, slotId, techId, s, e, 3, 4, 5);
 
         assertFalse(second.success());
         assertEquals(BaseCode.LUA_DUPLICATE.getCode(), second.getCode());
@@ -122,14 +132,14 @@ class AppointmentLuaIntegrationTest {
     void technicianOverlap_blocked() {
         long slotA = 1003L, techId = 2003L;
         seedStock(slotA, 5);
-        long base = 1_700_000_000_000L;
+        long base = FUTURE_START_MS;
 
-        assertTrue(luaService.book(10L, slotA, techId, base, base + 3_600_000L, 1, 2).success());
+        assertTrue(luaService.book(10L, slotA, techId, base, base + 3_600_000L, 1, 2, 5).success());
 
         long slotB = 1004L;
         seedStock(slotB, 5);
         BookResult overlap = luaService.book(20L, slotB, techId,
-            base + 1_800_000L, base + 5_400_000L, 3, 4);
+            base + 1_800_000L, base + 5_400_000L, 3, 4, 5);
 
         assertFalse(overlap.success(), "技师同一时刻不得被两单占用");
         assertEquals(BaseCode.SLOT_CLOSED.getCode(), overlap.getCode());
@@ -140,18 +150,20 @@ class AppointmentLuaIntegrationTest {
     void rollback_reversesSemantics() {
         long slotId = 1005L, techId = 2005L, uid = 60_001L;
         seedStock(slotId, 3);
-        long s = 1_700_000_000_000L, e = s + 3_600_000L;
+        long s = FUTURE_START_MS, e = s + 3_600_000L;
 
-        BookResult book = luaService.book(uid, slotId, techId, s, e, 100, 101);
+        BookResult book = luaService.book(uid, slotId, techId, s, e, 100, 101, 3);
         assertTrue(book.success());
         assertEquals(2, book.getAfterQty());
 
-        BookResult rb = luaService.rollback(uid, slotId, techId, s, e, 100, 102, 1);
+        BookResult rb = luaService.rollback(uid, slotId, techId, s, e, 100, 102, 1, 3);
         assertTrue(rb.success());
         assertEquals(book.getAfterQty() + 1, rb.getBeforeQty(), "回补 beforeQty 应为回补前余量+1（反转语义）");
         assertEquals(book.getAfterQty(), rb.getAfterQty(), "回补 afterQty 应为回补前余量");
-        assertNull(redis.opsForValue().get(RedisConstants.SLOT_STOCK + slotId),
-            "回补应删除库存键等待重载，避免值漂移");
+        // 2026-11-17 审计修复（Blocker）：回补**不得删除**库存键。
+        // 原实现 DEL 后无任何重载路径，该时段永久返回 10004「无库存键」（已实测复现）。
+        assertEquals("3", redis.opsForValue().get(RedisConstants.SLOT_STOCK + slotId),
+            "回补后余量必须恢复到容量，且库存键必须存在");
         assertFalse(Boolean.TRUE.equals(
             redis.opsForSet().isMember(RedisConstants.SLOT_USER + slotId, String.valueOf(uid))),
             "回补应移除用户一人一时段标记");
@@ -162,9 +174,9 @@ class AppointmentLuaIntegrationTest {
     void traceLogWritten() {
         long slotId = 1006L, techId = 2006L, uid = 70_001L;
         seedStock(slotId, 2);
-        long s = 1_700_000_000_000L, e = s + 3_600_000L;
+        long s = FUTURE_START_MS, e = s + 3_600_000L;
 
-        luaService.book(uid, slotId, techId, s, e, 200, 999);
+        luaService.book(uid, slotId, techId, s, e, 200, 999, 2);
 
         var entries = redis.opsForHash().entries(RedisConstants.SLOT_TRACE + slotId);
         assertEquals(1, entries.size(), "应对 traceId=999 写一条审计日志");

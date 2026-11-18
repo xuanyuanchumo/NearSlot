@@ -35,7 +35,7 @@ class AgentControllerTest {
         guard = mock(CommandGuard.class);
         tokenService = mock(ConfirmTokenService.class);
         planner = mock(TwoPhasePlanner.class);
-        controller = new AgentController(guard, tokenService, planner);
+        controller = new AgentController(guard, tokenService, planner, new org.nearslot.agent.config.AgentProperties());
         UserHolder.set(1001L);
     }
 

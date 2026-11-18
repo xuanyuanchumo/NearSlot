@@ -32,7 +32,7 @@ class TechRankServiceTest {
         valueOps = mock(ValueOperations.class);
         when(redis.opsForZSet()).thenReturn(zsetOps);
         when(redis.opsForValue()).thenReturn(valueOps);
-        service = new TechRankService(redis);
+        service = new TechRankService(redis, new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     @Test

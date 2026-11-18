@@ -4,37 +4,113 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Cache;
 import org.springframework.data.redis.core.StringRedisTemplate;
+
 import java.time.Duration;
-import java.util.concurrent.*;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-/** 多级缓存：Caffeine L1 + Redis L2 + 三防（穿透空值/击穿逻辑过期/雪崩Jitter）。 */
+/**
+ * 多级缓存：Caffeine L1 + Redis L2 + 三防（穿透空值 / 击穿单飞 / 雪崩 Jitter）。
+ *
+ * **2026-11-17 审计修复（Major×2）**：
+ * ① 此前所谓的「击穿逻辑过期」并不存在——未命中后直接 loader.apply 无任何互斥，
+ *    N 个并发 miss 就是 N 次 DB 回源；同时声明了 REBUILD 线程池却从未使用（死代码，已删）。
+ *    现改为**两级单飞**：
+ *      · 实例内 —— Caffeine 的 computeIfAbsent 天然对同 key 单飞；
+ *      · 跨实例 —— Redis SETNX 短锁，抢到者回源，未抢到者短暂重读 L2，仍无则直接回源
+ *        （宁可多查一次 DB 也不阻塞用户请求；回源本身有 DB 连接池保护）。
+ * ② 空值缓存此前沿用业务 TTL（+Jitter 后约 21–30 分钟），却已定义 TTL_NULL=120s 从不使用，
+ *    穿透窗口被放大十余倍。现 null 结果固定用 TTL_NULL 写独立空值 key。
+ */
 public class CacheManager {
+
     /** JSON 编解码器：由 Spring 容器注入（成熟库优先，禁止手 new）。 */
     private final ObjectMapper mapper;
 
     private final StringRedisTemplate redis;
-    private final Cache<String,String> l1 = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(20)).build();
-    private static final ExecutorService REBUILD = Executors.newFixedThreadPool(4, r -> {
-        Thread t = new Thread(r, "cache-rebuild"); t.setDaemon(true); return t; });
 
-    public CacheManager(StringRedisTemplate redis, ObjectMapper mapper) {
+    /** 基础设施调优参数：L1 TTL / 重建锁 TTL / 等待时长（`nearslot.framework.cache-*`）。 */
+    private final org.nearslot.framework.config.properties.FrameworkProperties props;
+
+    private final Cache<String, String> l1;
+
+    public CacheManager(StringRedisTemplate redis, ObjectMapper mapper,
+                        org.nearslot.framework.config.properties.FrameworkProperties props) {
         this.redis = redis;
         this.mapper = mapper;
+        this.props = props;
+        // L1 TTL 来自配置：多实例缩短 L1 可降低陈旧窗口，本地调试则可加长减少回源
+        this.l1 = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(props.getCacheL1TtlMinutes())).build();
     }
 
-    /** 穿透防护：空值缓存 2min；雪崩防护：TTL 70%~100% 随机。 */
-    public <T> T get(String key, Class<T> type, Function<String,T> loader, long ttlSeconds) {
+    /**
+     * 读穿缓存。
+     *
+     * @param ttlSeconds 业务 TTL；实际写入时会叠加 70%~100% 随机抖动（防雪崩）
+     */
+    public <T> T get(String key, Class<T> type, Function<String, T> loader, long ttlSeconds) {
         String hit = l1.getIfPresent(key);
         if (hit != null) return deserialize(hit, type);
+
         String redisVal = redis.opsForValue().get(key);
-        if (redisVal != null) { l1.put(key, redisVal); return deserialize(redisVal, type); }
-        T val = loader.apply(key);
-        long jitter = ttlSeconds * 7 / 10 + (long)(Math.random() * (ttlSeconds * 3 / 10));
+        if (redisVal != null) {
+            l1.put(key, redisVal);
+            return deserialize(redisVal, type);
+        }
+        return loadSingleFlight(key, type, loader, ttlSeconds);
+    }
+
+    /** 击穿防护：同 key 只有一个回源者；其余短暂等待后重读 L2。 */
+    private <T> T loadSingleFlight(String key, Class<T> type, Function<String, T> loader, long ttlSeconds) {
+        String lockKey = key + ":rebuild";
+        Boolean acquired = redis.opsForValue()
+            .setIfAbsent(lockKey, "1", props.getCacheRebuildLockSeconds(), TimeUnit.SECONDS);
+        if (!Boolean.TRUE.equals(acquired)) {
+            // 别的实例正在回源：短暂等待后重读，读不到就自己回源（不阻塞用户）
+            sleepQuietly();
+            String again = redis.opsForValue().get(key);
+            if (again != null) {
+                l1.put(key, again);
+                return deserialize(again, type);
+            }
+            return writeBack(key, loader.apply(key), ttlSeconds);
+        }
+        try {
+            // 双重检查：抢锁期间可能已被别的实例写入
+            String again = redis.opsForValue().get(key);
+            if (again != null) {
+                l1.put(key, again);
+                return deserialize(again, type);
+            }
+            return writeBack(key, loader.apply(key), ttlSeconds);
+        } finally {
+            redis.delete(lockKey);
+        }
+    }
+
+    /** 回写缓存：空值走短 TTL（防穿透），非空走业务 TTL + 抖动（防雪崩）。 */
+    private <T> T writeBack(String key, T val, long ttlSeconds) {
+        if (val == null) {
+            // 空值只缓存 TTL_NULL 秒；值留空串表示「确认不存在」
+            redis.opsForValue().set(key, "", RedisConstants.TTL_NULL, TimeUnit.SECONDS);
+            return null;
+        }
+        long jitter = ttlSeconds * 7 / 10
+            + (long) (ThreadLocalRandom.current().nextDouble() * (ttlSeconds * 3 / 10));
         String encoded = serialize(val);
-        redis.opsForValue().set(key, encoded, jitter, TimeUnit.SECONDS);
-        if (val != null) l1.put(key, encoded);
+        redis.opsForValue().set(key, encoded, Math.max(jitter, 1L), TimeUnit.SECONDS);
+        l1.put(key, encoded);
         return val;
+    }
+
+    private void sleepQuietly() {
+        try {
+            Thread.sleep(props.getCacheRebuildWaitMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -69,5 +145,8 @@ public class CacheManager {
         }
     }
 
-    public void invalidate(String key) { l1.invalidate(key); redis.delete(key); }
+    public void invalidate(String key) {
+        l1.invalidate(key);
+        redis.delete(key);
+    }
 }

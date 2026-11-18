@@ -30,7 +30,8 @@ class CacheManagerTest {
         redis = mock(StringRedisTemplate.class);
         valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
-        cm = new CacheManager(redis, new ObjectMapper());
+        cm = new CacheManager(redis, new ObjectMapper(),
+            new org.nearslot.framework.config.properties.FrameworkProperties());
     }
 
     @Test

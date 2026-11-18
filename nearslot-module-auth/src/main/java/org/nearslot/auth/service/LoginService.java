@@ -39,6 +39,14 @@ import java.util.concurrent.TimeUnit;
 public class LoginService {
 
     /** 验证码原子消费：GET+DEL，防重复使用。 */
+    /**
+     * 常量 BCrypt 哈希（固定值，不对应任何真实口令）。
+     * 用途：当账号不存在或哈希非 BCrypt 时也跑一次 matches，
+     * 使「账号存在与否」无法通过响应时间差被枚举。
+     */
+    private static final String DUMMY_HASH =
+        "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     private static final String CONSUME_CODE =
         "local v = redis.call('GET', KEYS[1]) "
         + "if not v then return 0 end "
@@ -55,10 +63,22 @@ public class LoginService {
 
     /** 登录：按 type 分流密码 / 验证码。 */
     public LoginResponse login(LoginRequest req, String clientIp) {
+        // ============================================================
+        // 限流（2026-11-17 审计修复，Major）：
+        // 此前只有一个 RateType.OVERALL 的全局 20 次/60 秒桶——
+        //   · 挡不住针对**单账号**的爆破（换个账号就绕过）；
+        //   · 全球 20 次打满后**全站无法登录**（可用性反被限流本身打挂）。
+        // 现叠加账号维度频控（LOGIN_FAIL_IP 常量组已有，但此前从未使用），
+        // 全局桶保留为总闸，账号桶做定向保护。
+        // ============================================================
         if (!rateLimiter.tryAcquire("login")) {
             throw new BaseException(BaseCode.RATE_LIMITED);
         }
         String phone = req.getPhone();
+        if (!acquireAccountBudget(phone)) {
+            log.warn("登录账号维度频控触发 phone={} ip={}", maskPhone(phone), clientIp);
+            throw new BaseException(BaseCode.RATE_LIMITED, "操作过于频繁，请稍后再试");
+        }
         String lockKey = RedisConstants.LOGIN_LOCK + phone;
         if (Boolean.TRUE.equals(redis.hasKey(lockKey))) {
             throw new BaseException(BaseCode.RATE_LIMITED, "账户已锁定，请 30 分钟后重试");
@@ -99,21 +119,30 @@ public class LoginService {
             throw new BaseException(BaseCode.UNAUTHORIZED, "密码不能为空");
         }
         String stored = user.getPassword() == null ? "" : user.getPassword();
-        boolean ok = stored.startsWith("$2")
-            ? passwordEncoder.matches(raw, stored)
-            : stored.equals(raw);
+        // ============================================================
+        // 安全红线（2026-11-17 审计修复，Major）：
+        // 此前保留 `stored.equals(raw)` 明文兜底比较——一旦历史明文口令落库，
+        // 等价于无哈希存储；且 String.equals 非常量时间，可被时序侧信道利用。
+        //
+        // 现改为：非 BCrypt 哈希一律走 dummy 校验后**拒绝登录**，强制重置密码。
+        // BCrypt 分支的 matches 自带常量时间比较。
+        // ============================================================
+        boolean ok;
+        if (stored.startsWith("$2")) {
+            ok = passwordEncoder.matches(raw, stored);
+        } else {
+            // 对空/非 BCrypt 哈希也跑一次 BCrypt，避免"存储格式"通过响应时间泄露
+            passwordEncoder.matches(raw, DUMMY_HASH);
+            ok = false;
+            log.warn("账号密码哈希格式非 BCrypt，已拒绝登录并要求重置 userId={}", user.getId());
+        }
 
         if (!ok) {
             recordFailure(req.getPhone());
             throw new BaseException(BaseCode.UNAUTHORIZED, "账号或密码错误");
         }
-        if (!stored.startsWith("$2")) {
-            User upd = new User();
-            upd.setId(user.getId());
-            upd.setPassword(passwordEncoder.encode(raw));
-            userMapper.updateById(upd);
-            log.info("密码已自动升级为 BCrypt userId={}", user.getId());
-        }
+        // 注意：不再做"旧哈希自动升级"——非 BCrypt 已直接拒绝登录（见上分支），
+        // 能走到这里的必然是合法 BCrypt 哈希，无需迁移。
     }
 
     /** 验证码校验：Lua 原子消费。 */
@@ -130,6 +159,34 @@ public class LoginService {
             recordFailure(phone);
             throw new BaseException(BaseCode.UNAUTHORIZED, "验证码错误或已失效");
         }
+    }
+
+    /**
+     * 账号维度频控（60 秒窗口）。
+     *
+     * 为什么与全局桶并存：全局桶是「总闸」（防雪崩），
+     * 账号桶是「定向闸」（防对单账号爆破）。二者缺一不可。
+     * 用 Lua 保证 INCR + EXPIRE 原子，失败即降级放行（限流是保护手段而非业务前提）。
+     */
+    private boolean acquireAccountBudget(String phone) {
+        if (phone == null || phone.isBlank()) return true;
+        try {
+            String key = RedisConstants.LOGIN_FAIL_IP + phone;
+            Long count = redis.opsForValue().increment(key);
+            if (count != null && count == 1L) {
+                redis.expire(key, RedisConstants.TTL_FAIL_IP, TimeUnit.SECONDS);
+            }
+            return count == null || count <= RedisConstants.MAX_FAIL_IP;
+        } catch (RuntimeException e) {
+            log.warn("账号维度频控不可用，本次放行 phone={}", maskPhone(phone));
+            return true;
+        }
+    }
+
+    /** 日志脱敏：手机号只保留前 3 位与后 2 位（security/guidelines.md §4 禁止明文落日志）。 */
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.length() < 6) return "***";
+        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 2);
     }
 
     /**
