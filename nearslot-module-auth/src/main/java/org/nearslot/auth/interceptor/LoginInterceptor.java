@@ -25,7 +25,8 @@ public class LoginInterceptor implements HandlerInterceptor {
         "/api/v1/slots",       // 时段查询：未登录用户需先浏览时段才能决定是否登录
         "/api/v1/tech-rank",   // 热门服务者榜：公开只读（FR-4.3）
         "/api/v1/shop-types",  // 店铺分类字典：公开只读（FR-10），首页筛选要用
-        "/api/v1/blogs"        // 笔记详情/热门/店铺笔记：公开只读（FR-7），未登录也应能浏览
+        "/api/v1/blogs",       // 笔记详情/热门/店铺笔记：公开只读（FR-7），未登录也应能浏览
+        "/api/v1/files"        // 图片读取：笔记配图/店铺封面需匿名可见（FR-11；上传仍要求登录）
     );
 
     @Override

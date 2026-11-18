@@ -21,8 +21,9 @@ public class ShopController {
     @Operation(summary = "服务商列表", description = "分页返回，供前端首页加载")
     @GetMapping
     public Result<org.nearslot.common.page.PageResult<Shop>> list(
-            @RequestParam(value = "page", defaultValue = "1") int page,
-            @RequestParam(value = "size", defaultValue = "10") int size,
+            // 缺省值由 `nearslot.shop.default-page-size` 决定（可空 -> Service 兜底）
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
             @RequestParam(value = "typeId", required = false) Long typeId) {
         return Result.ok(shopService.page(page, size, typeId));
     }
@@ -43,7 +44,8 @@ public class ShopController {
     @GetMapping("/nearby")
     public Result<List<Shop>> nearby(@RequestParam("x") double x,
                                      @RequestParam("y") double y,
-                                     @RequestParam(value = "km", defaultValue = "5") double km) {
-        return Result.ok(shopService.searchNearby(x, y, km));
+                                     // 半径缺省取 `nearslot.shop.nearby-radius-km`
+                                     @RequestParam(value = "km", required = false) Double km) {
+        return Result.ok(shopService.searchNearby(x, y, km == null ? 0 : km));
     }
 }

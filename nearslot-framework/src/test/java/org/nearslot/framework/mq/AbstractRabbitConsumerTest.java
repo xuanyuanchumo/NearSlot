@@ -21,6 +21,12 @@ class AbstractRabbitConsumerTest {
 
     /** 可观测的测试消费者：记录 convert / markProcessed / doConsume / onFailure 的每一次调用。 */
     static class TestConsumer extends AbstractRabbitConsumer<String> {
+        TestConsumer() {
+            // 用属性默认值（mq-max-retry=3 / mq-message-delay-ms=10000），
+            // 与改造前行为一致，测试用例无需逐个改。
+            super(new org.nearslot.framework.config.properties.FrameworkProperties());
+        }
+
         final List<String> converted = new ArrayList<>();
         final List<String> markCalls = new ArrayList<>();
         final List<String> consumed = new ArrayList<>();
@@ -122,7 +128,8 @@ class AbstractRabbitConsumerTest {
     @DisplayName("投递延迟门：producerTime 超阈值 -> 登记失败并直接丢弃，不执行业务、不抛异常")
     void delayedMessageIsDropped() {
         TestConsumer c = new TestConsumer();
-        long tooOld = System.currentTimeMillis() - AbstractRabbitConsumer.MESSAGE_DELAY_MS - 1000;
+        long tooOld = System.currentTimeMillis()
+            - new org.nearslot.framework.config.properties.FrameworkProperties().getMqMessageDelayMs() - 1000;
 
         assertDoesNotThrow(() -> c.handle(msg("order-1", tooOld)));
 
@@ -158,6 +165,10 @@ class AbstractRabbitConsumerTest {
 
     /** 不覆写 onFailure 的最小消费者：覆盖模板里 onFailure 的默认空实现。 */
     static class MinimalConsumer extends AbstractRabbitConsumer<String> {
+        MinimalConsumer() {
+            super(new org.nearslot.framework.config.properties.FrameworkProperties());
+        }
+
         @Override
         protected String convert(Message message) {
             return new String(message.getBody(), java.nio.charset.StandardCharsets.UTF_8);

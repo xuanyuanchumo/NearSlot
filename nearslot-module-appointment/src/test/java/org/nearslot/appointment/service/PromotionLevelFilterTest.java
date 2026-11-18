@@ -81,7 +81,8 @@ class PromotionLevelFilterTest {
 
     /** 构造 PromotionService（构造器顺序严格对齐 @RequiredArgsConstructor）。 */
     private PromotionService promotionWith(UserLevelQuery levelQuery) {
-        return new PromotionService(redis, lockTemplate, slotMapper, levelQuery, bookingCore);
+        return new PromotionService(redis, lockTemplate, slotMapper, levelQuery, bookingCore,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     // ---------- 入队等级过滤 ----------

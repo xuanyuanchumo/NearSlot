@@ -40,14 +40,14 @@ import java.util.concurrent.TimeUnit;
 public class PromotionService {
 
     private static final long TTL_SECONDS = 86400L;
-    /** 单次提升最多跳过多少个不合格候选，防死循环。 */
-    private static final int MAX_SKIP = 20;
 
     private final StringRedisTemplate redis;
     private final DistributedLockTemplate lockTemplate;
     private final TimeSlotMapper timeSlotMapper;
     private final UserLevelQuery userLevelQuery;
     private final SlotBookingCore bookingCore;
+    /** 提升跳过上限外置到 `nearslot.appointment.max-promotion-skip`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /**
      * 监听余量回流事件并异步提升候补。
@@ -87,7 +87,8 @@ public class PromotionService {
         if (slot == null) return null;
         int minLevel = slot.getMinLevel() == null ? 0 : slot.getMinLevel();
 
-        for (int i = 0; i < MAX_SKIP; i++) {
+        int maxSkip = props.getMaxPromotionSkip();
+        for (int i = 0; i < maxSkip; i++) {
             Set<String> head = redis.opsForZSet().range(zsetKey, 0, 0);
             if (head == null || head.isEmpty()) return null;
             String userId = head.iterator().next();
@@ -117,7 +118,7 @@ public class PromotionService {
                     slotId, userId, e.getCode().getCode());
             }
         }
-        log.warn("候补提升达到最大跳过次数 {}，仍有不合格候选 slotId={}", MAX_SKIP, slotId);
+        log.warn("候补提升达到最大跳过次数 {}，仍有不合格候选 slotId={}", maxSkip, slotId);
         return null;
     }
 

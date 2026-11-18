@@ -31,6 +31,8 @@ public class ShopService {
     private final BloomFilterHandler bloomFilter;
     private final StringRedisTemplate redis;
     private final org.nearslot.shop.mapper.TechnicianMapper technicianMapper;
+    /** 分页与 GEO 策略外置到 `nearslot.shop.*`。 */
+    private final org.nearslot.shop.config.ShopProperties props;
 
     private static final String GEO_KEY = "nearslot:geo:shop";
 
@@ -83,9 +85,13 @@ public class ShopService {
      * 由 PaginationInnerInterceptor 统一生成 count 与 limit，并受 maxLimit=500 保护。
      * 同时把 size 上限交给插件而非在这里散落 clamp 逻辑。
      */
-    public org.nearslot.common.page.PageResult<Shop> page(int page, int size, Long typeId) {
-        long current = Math.max(1L, page);
-        long pageSize = Math.max(1L, Math.min(size, 50L));
+    public org.nearslot.common.page.PageResult<Shop> page(Integer page, Integer size, Long typeId) {
+        // 默认值与上限都来自 `nearslot.shop.*`：到店/上门业态的分页习惯不同，
+        // 写死会导致运营想改每页条数就得发版。
+        long current = page == null || page < 1 ? 1L : page;
+        long pageSize = size == null || size < 1
+            ? props.getDefaultPageSize()
+            : Math.min(size, props.getMaxPageSize());
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<Shop>lambdaQuery();
         if (typeId != null) q.eq(Shop::getTypeId, typeId);
         q.orderByAsc(Shop::getId);
@@ -106,7 +112,9 @@ public class ShopService {
 
     /** 附近服务商：GEOSEARCH 半径 + 距离升序（FR-2.3）。 */
     @SuppressWarnings("unchecked")
-    public List<Shop> searchNearby(double x, double y, double km) {
+    public List<Shop> searchNearby(double x, double y, double kmOrNull) {
+        // 半径缺省与返回条数上限外置：到店 5km 够，上门可能要 20km。
+        double km = kmOrNull > 0 ? kmOrNull : props.getNearbyRadiusKm();
         List<Object> members = redis.execute(GEO_SEARCH, List.of(GEO_KEY),
             String.valueOf(x), String.valueOf(y), String.valueOf(km), "20");
         if (members == null || members.isEmpty()) return List.of();

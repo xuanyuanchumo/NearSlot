@@ -58,7 +58,8 @@ class SlotPublishServiceTest {
         reminderService = mock(ReminderService.class);
         staffSkillQuery = mock(StaffSkillQuery.class);
         service = new SlotPublishService(slotMapper, redis, publisher, lockTemplate,
-            reminderService, staffSkillQuery, cacheManager);
+            reminderService, staffSkillQuery, cacheManager,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     // ---------- 发布校验 ----------

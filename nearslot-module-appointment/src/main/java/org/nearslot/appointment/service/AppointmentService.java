@@ -56,6 +56,8 @@ public class AppointmentService {
     private final AppointmentLuaService luaService;
     /** 核销码作废（FR-6.1）：取消路径必须同步作废，否则存在"已退款仍可核销"的资损口。 */
     private final VoucherService voucherService;
+    /** 列表上限等策略外置到 `nearslot.appointment.*`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     @Idempotent(key = "#userId + ':' + #slotId", ttl = 10)
     public Long book(Long userId, Long slotId) {
@@ -95,7 +97,7 @@ public class AppointmentService {
         var q = com.baomidou.mybatisplus.core.toolkit.Wrappers.<AppointmentOrder>lambdaQuery()
             .eq(AppointmentOrder::getUserId, userId);
         if (status != null) q.eq(AppointmentOrder::getStatus, status);
-        q.orderByDesc(AppointmentOrder::getId).last("LIMIT 50");
+        q.orderByDesc(AppointmentOrder::getId).last("LIMIT " + props.getMyOrdersLimit());
         return orderMapper.selectList(q);
     }
 

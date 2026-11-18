@@ -28,17 +28,17 @@ import java.util.function.Consumer;
 @Component
 public class RedissonDelayQueue {
 
-    /** 单条消息最多重投次数（超过转死信，避免毒消息无限循环）。 */
-    private static final int MAX_REDELIVER = 3;
-    /** 重投退避基数（秒），按 attempt 递增：10s / 20s / 40s。 */
-    private static final long REDELIVER_BASE_SECONDS = 10L;
-    /** 死信队列后缀。 */
+    /** 死信队列后缀（拓扑约定，保持常量）。 */
     private static final String DLQ_SUFFIX = ":dlq";
 
     private final RedissonClient redisson;
+    /** 重投次数与退避基数外置到 `nearslot.framework.delay-*`。 */
+    private final org.nearslot.framework.config.properties.FrameworkProperties props;
 
-    public RedissonDelayQueue(RedissonClient redisson) {
+    public RedissonDelayQueue(RedissonClient redisson,
+                              org.nearslot.framework.config.properties.FrameworkProperties props) {
         this.redisson = redisson;
+        this.props = props;
     }
 
     public void offer(String queueName, Object payload, long delaySeconds) {
@@ -84,7 +84,7 @@ public class RedissonDelayQueue {
         Integer previous = attempts.get(payload);
         int attempt = previous == null ? 1 : previous + 1;
         attempts.put(payload, attempt);
-        if (attempt > MAX_REDELIVER) {
+        if (attempt > props.getDelayMaxRedeliver()) {
             attempts.remove(payload);
             // 死信：不再重试，但必须留下可查证据，供对账/人工补偿
             redisson.getBlockingQueue(queueName + DLQ_SUFFIX).offer(payload);
@@ -92,7 +92,7 @@ public class RedissonDelayQueue {
                 queueName, attempt - 1, payload, cause);
             return;
         }
-        long backoff = REDELIVER_BASE_SECONDS * (1L << (attempt - 1));
+        long backoff = props.getDelayRedeliverBaseSeconds() * (1L << (attempt - 1));
         offer(queueName, payload, backoff);
         log.error("延迟队列消费失败，{}s 后第 {} 次重投 queue={} payload={}",
             backoff, attempt, queueName, payload, cause);

@@ -1,6 +1,11 @@
 spring:
   application:
     name: nearslot
+  # 上传大小上限必须 >= nearslot.storage.max-file-size-bytes，否则请求在进入 Controller 前就被拒
+  servlet:
+    multipart:
+      max-file-size: ${NEARSLOT_UPLOAD_MAX:5MB}
+      max-request-size: ${NEARSLOT_UPLOAD_MAX:5MB}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   # Spring AI 自动配置：未配置 spring.ai.openai.api-key 时排除，避免启动即失败
@@ -46,3 +51,84 @@ springdoc:
 logging:
   level:
     org.nearslot: ${LOG_LEVEL_MODULE:INFO}
+
+# ============================================================================
+# 业务策略与基础设施调优参数（2026-11-18 去硬编码治理）
+#
+# 为什么集中在这里：以前这些值散落在 Java 常量里（BIG_V_THRESHOLD=1000、
+# HOLD_MINUTES=10、MAX_SKIP=20…），改一次要改代码 + 重新发版 + 回归。
+# 它们都是**运营/运维可调的策略**，正确取值只能由真实数据决定。
+#
+# 保持为常量的（刻意不配置化）：Redis 键前缀、MQ 交换机/队列名、订单状态码 ——
+# 这些是命名规范与跨服务协议，可配置化只会增加排查成本。
+# ============================================================================
+nearslot:
+  appointment:
+    # Hold 窗口（分钟）：必须大于支付 P99，过长会降低时段翻台率
+    hold-minutes: 10
+    # 单次候补提升最多跳过多少个不合格候选（防死循环）
+    max-promotion-skip: 20
+    # 「我的预约」列表返回上限
+    my-orders-limit: 50
+    # 可约时段单次查询上限
+    slot-query-limit: 200
+    # 对账任务单批处理量
+    reconcile-batch-size: 200
+    # 核销码：长度 / 字母表（去掉易混字符）/ 签发冲突重试
+    voucher-code-length: 12
+    voucher-code-alphabet: "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+    voucher-issue-retry: 3
+  content:
+    # 大 V 阈值（ADR-027）：粉丝数超过此值不写扩散，读取时合并
+    big-v-threshold: 1000
+    # 读 Feed 时最多合并多少个大 V
+    max-big-v-merge: 20
+    # 合并大 V 时每人取最新几篇
+    feed-blogs-per-author: 5
+    # Feed 单次扫描收件箱上限
+    feed-max-fetch: 200
+    # 关注/粉丝/点赞关系缓存 TTL（小时）
+    relation-cache-hours: 1
+    # 签到积分规则
+    sign-base-points: 1
+    sign-week-bonus: 5
+    sign-week-days: 7
+    sign-month-bonus: 20
+    sign-month-days: 30
+    sign-continuous-lookback-days: 60
+    sign-bitmap-ttl-seconds: 2592000
+  shop:
+    # 列表分页：默认与上限
+    default-page-size: 10
+    max-page-size: 50
+    admin-default-page-size: 20
+    # 附近检索：到店 5km 够，上门业态需上调
+    nearby-radius-km: 5.0
+    nearby-max-results: 20
+  mybatis:
+    # 单页上限（防 size=100000 打穿 DB），随 DB 规格调整
+    max-limit: 500
+    overflow: false
+  storage:
+    # 存储后端：local（磁盘，默认）| oss（需实现 FileStorage 并注册 Bean）
+    type: local
+    # 物理根目录：本地写 data/uploads，生产应指向挂载盘
+    local-root: ${NEARSLOT_STORAGE_ROOT:data/uploads}
+    # 对外访问前缀：换域名/CDN 只改这里，业务代码不感知
+    public-base-url: ${NEARSLOT_STORAGE_URL:/api/v1/files}
+    # 单文件上限（字节，默认 5MB），需与 spring.servlet.multipart 保持一致
+    max-file-size-bytes: ${NEARSLOT_STORAGE_MAX_BYTES:5242880}
+    # 允许的扩展名（小写、逗号分隔）
+    allowed-extensions: jpg,jpeg,png,webp,gif
+    # 校验文件头魔数，防"改扩展名上传脚本"
+    verify-magic-number: true
+  framework:
+    # 延迟队列：重投次数与退避基数（base, base*2, base*4）
+    delay-max-redeliver: 3
+    delay-redeliver-base-seconds: 10
+    # MQ 消费：最大重试与投递延迟门（毫秒）
+    mq-max-retry: 3
+    mq-message-delay-ms: 10000
+    # 缓存重建互斥：锁 TTL 与等待重读时长
+    cache-rebuild-lock-seconds: 5
+    cache-rebuild-wait-millis: 50

@@ -37,7 +37,9 @@ class RedissonDelayQueueTest {
         redisson = mock(RedissonClient.class);
         blocking = mock(RBlockingQueue.class);
         delayed = mock(RDelayedQueue.class);
-        queue = new RedissonDelayQueue(redisson);
+        // 重投次数/退避基数走属性默认值（与改造前一致），测试聚焦队列语义
+        queue = new RedissonDelayQueue(redisson,
+            new org.nearslot.framework.config.properties.FrameworkProperties());
     }
 
     /** 绑定队列名到 mock，并清掉 stubbing 期间记录的调用。 */

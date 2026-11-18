@@ -40,22 +40,24 @@ import java.util.Map;
 public class ReconciliationTask {
 
     private static final long RECONCILE_INTERVAL_MS = 5 * 60_000L;
-    private static final int BATCH_SIZE = 200;
+
     /** 在途保护窗口：延迟阈值 10s + 2s（research/09b §2）。 */
     public static final long IN_FLIGHT_WINDOW_MS = 12_000L;
 
     private final AppointmentOrderMapper orderMapper;
     private final ReconcileLogMapper logMapper;
     private final StringRedisTemplate redis;
+    /** 对账批大小外置到 `nearslot.appointment.reconcile-batch-size`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
     /** 业务指标出口（可选注入，便于单测不依赖 Micrometer）。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Scheduled(fixedDelay = RECONCILE_INTERVAL_MS)
     public void reconcile() {
-        // 用 MP Page 代替手拼 LIMIT（BATCH_SIZE 是常量，但仍应走插件统一出口）
+        // 用 MP Page 代替手拼 LIMIT；批大小外置到 `nearslot.appointment.reconcile-batch-size`
         var page = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<AppointmentOrder>(
-            1, BATCH_SIZE);
+            1, props.getReconcileBatchSize());
         List<AppointmentOrder> pending = orderMapper.selectPage(page,
             Wrappers.<AppointmentOrder>lambdaQuery()
                 .and(w -> w.isNull(AppointmentOrder::getReconcileStatus)

@@ -40,6 +40,8 @@ public class SlotPublishService {
     private final ReminderService reminderService;
     private final org.nearslot.common.api.StaffSkillQuery staffSkillQuery;
     private final org.nearslot.framework.cache.CacheManager cacheManager;
+    /** 时段查询上限外置到 `nearslot.appointment.slot-query-limit`。 */
+    private final org.nearslot.appointment.config.AppointmentProperties props;
 
     /** 发布时段（幂等）。 */
     @Transactional(rollbackFor = Exception.class)
@@ -121,7 +123,7 @@ public class SlotPublishService {
         }
         q.orderByAsc(TimeSlot::getStartsAt);
         java.util.List<TimeSlot> slots = timeSlotMapper.selectList(
-            q.last("LIMIT 200"));
+            q.last("LIMIT " + props.getSlotQueryLimit()));
         // 批量取余量，避免循环内单键 GET（N+1 往返）
         java.util.List<String> stockKeys = slots.stream()
             .map(s -> RedisConstants.SLOT_STOCK + s.getId()).toList();

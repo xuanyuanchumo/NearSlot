@@ -68,7 +68,7 @@ class WaitlistIntegrationTest {
                 org.mockito.ArgumentMatchers.anyLong()))
             .thenAnswer(inv -> 9_000_000L + System.nanoTime() % 100_000L);
         promotion = new PromotionService(redis, new DistributedLockTemplate(redisson), slotMapper,
-            levelQuery, bookingCore);
+            levelQuery, bookingCore, new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     @AfterAll

@@ -65,7 +65,8 @@ class AppointmentServiceTest {
         voucherService = mock(VoucherService.class);
         // 构造器顺序严格对齐 @RequiredArgsConstructor 的字段声明顺序
         service = new AppointmentService(bookingCore, timeSlotMapper, orderMapper, holdTimeoutTask,
-            reconcileService, userLevelQuery, eventPublisher, luaService, voucherService);
+            reconcileService, userLevelQuery, eventPublisher, luaService, voucherService,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     private TimeSlot slot(Integer status, Integer minLevel) {

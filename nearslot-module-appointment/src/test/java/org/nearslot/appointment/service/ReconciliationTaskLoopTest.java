@@ -39,7 +39,8 @@ class ReconciliationTaskLoopTest {
         redis = mock(StringRedisTemplate.class);
         hashOps = mock(HashOperations.class);
         when(redis.opsForHash()).thenReturn(hashOps);
-        task = new ReconciliationTask(orderMapper, logMapper, redis);
+        task = new ReconciliationTask(orderMapper, logMapper, redis,
+            new org.nearslot.appointment.config.AppointmentProperties());
     }
 
     /**
