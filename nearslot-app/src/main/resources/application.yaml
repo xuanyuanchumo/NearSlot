@@ -126,6 +126,17 @@ nearslot:
     sign-month-days: 30
     sign-continuous-lookback-days: 60
     sign-bitmap-ttl-seconds: 2592000
+  review:
+    # 履约后多少天内可评价（超期视为放弃，防"考古式"刷分）
+    window-days: 30
+    # 评分区间与正文/图片/回复上限
+    rating-min: 1
+    rating-max: 5
+    max-content-length: 1000
+    max-images: 9
+    max-reply-length: 1000
+    # 无评分时的默认均分（放大 100 倍，500 = 5.00）
+    default-rating-avg: 500
   shop:
     # 列表分页：默认与上限
     default-page-size: 10

@@ -26,7 +26,8 @@ public class LoginInterceptor implements HandlerInterceptor {
         "/api/v1/tech-rank",   // 热门服务者榜：公开只读（FR-4.3）
         "/api/v1/shop-types",  // 店铺分类字典：公开只读（FR-10），首页筛选要用
         "/api/v1/blogs",       // 笔记详情/热门/店铺笔记：公开只读（FR-7），未登录也应能浏览
-        "/api/v1/files"        // 图片读取：笔记配图/店铺封面需匿名可见（FR-11；上传仍要求登录）
+        "/api/v1/files",       // 图片读取：笔记配图/店铺封面需匿名可见（FR-11；上传仍要求登录）
+        "/api/v1/reviews"      // 技师/店铺评价列表与评分概况：公开只读（FR-12）；提交/撤回/回复要求登录
     );
 
     @Override
