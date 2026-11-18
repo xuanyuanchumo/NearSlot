@@ -1,7 +1,7 @@
 {
   "components": {
     "schemas": {
-      "AppointmentOrder": {
+      "AppointmentView": {
         "properties": {
           "amountCent": {
             "format": "int32",
@@ -15,19 +15,12 @@
             "format": "date-time",
             "type": "string"
           },
-          "fulfillmentMode": {
-            "type": "string"
-          },
           "holdExpiresAt": {
             "format": "date-time",
             "type": "string"
           },
           "id": {
             "format": "int64",
-            "type": "integer"
-          },
-          "reconcileStatus": {
-            "format": "int32",
             "type": "integer"
           },
           "serviceStaffId": {
@@ -37,9 +30,6 @@
           "shopId": {
             "format": "int64",
             "type": "integer"
-          },
-          "shopName": {
-            "type": "string"
           },
           "slotId": {
             "format": "int64",
@@ -57,10 +47,6 @@
             "type": "string"
           },
           "tzId": {
-            "type": "string"
-          },
-          "updatedAt": {
-            "format": "date-time",
             "type": "string"
           },
           "userId": {
@@ -631,14 +617,14 @@
         ],
         "type": "object"
       },
-      "ResultAppointmentOrder": {
+      "ResultAppointmentView": {
         "properties": {
           "code": {
             "format": "int32",
             "type": "integer"
           },
           "data": {
-            "$ref": "#/components/schemas/AppointmentOrder"
+            "$ref": "#/components/schemas/AppointmentView"
           },
           "message": {
             "type": "string"
@@ -708,7 +694,7 @@
         },
         "type": "object"
       },
-      "ResultListAppointmentOrder": {
+      "ResultListAppointmentView": {
         "properties": {
           "code": {
             "format": "int32",
@@ -716,7 +702,7 @@
           },
           "data": {
             "items": {
-              "$ref": "#/components/schemas/AppointmentOrder"
+              "$ref": "#/components/schemas/AppointmentView"
             },
             "type": "array"
           },
@@ -1932,7 +1918,7 @@
             "content": {
               "*/*": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResultListAppointmentOrder"
+                  "$ref": "#/components/schemas/ResultListAppointmentView"
                 }
               }
             },
@@ -2005,7 +1991,7 @@
             "content": {
               "*/*": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResultAppointmentOrder"
+                  "$ref": "#/components/schemas/ResultAppointmentView"
                 }
               }
             },
