@@ -96,7 +96,7 @@ jobs:
         run: |
           cd NearSlot
           python3 - <<'PY'
-          import csv, glob, os
+          import csv, glob, os, sys
           tot=[0,0]; br=[0,0]; rows=[]
           for f in glob.glob('*/target/site/jacoco/jacoco.csv'):
               m=f.split(os.sep)[0]; lc=lm=bc=bm=0
@@ -110,6 +110,11 @@ jobs:
               print(f"{m:30s} {0 if t==0 else round(100*c/t,1)}%")
           line = 0 if tot[1]==0 else round(100*tot[0]/tot[1],1)
           print(f"合计行覆盖 {line}% ({tot[0]}/{tot[1]})")
+          # G4 门槛：此前只打印不拦截，等于假门禁；现在低于 80% 直接失败
+          THRESHOLD = 80.0
+          if line < THRESHOLD:
+              print(f"::error::行覆盖率 {line}% 低于 G4 门槛 {THRESHOLD}%")
+              sys.exit(1)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
               s.write(f"## 覆盖率\n\n行覆盖 **{line}%**（{tot[0]}/{tot[1]}）\n")
           PY

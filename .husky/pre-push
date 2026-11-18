@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# 推送前自检（AGENTS.md §1/§4）；失败则拒绝推送，避免把不合规提交推到远端
+bash scripts/dev/pre-push-check.sh || exit 1
