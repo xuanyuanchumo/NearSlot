@@ -23,13 +23,13 @@ public class OrderQueryImpl implements OrderQuery {
 
     @Override
     public OrderView byId(Long userId, Long orderId) {
-        AppointmentOrder o;
-        try {
-            o = appointmentService.queryOrder(userId, orderId);
-        } catch (RuntimeException e) {
+        // 直接查 mapper：queryOrder 现返回 AppointmentView（前端展示视图），
+        // 而 OrderQuery 契约消费方（AI 助手）需要实体字段——两者用途不同，不走同一路径。
+        AppointmentOrder o = orderMapper.selectById(orderId);
+        if (o == null || !userId.equals(o.getUserId())) {
             return null;   // 归属不符/不存在：统一返回 null，不泄露存在性
         }
-        return o == null ? null : toView(o);
+        return toView(o);
     }
 
     @Override

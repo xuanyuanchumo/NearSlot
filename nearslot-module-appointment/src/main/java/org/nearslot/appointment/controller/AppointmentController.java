@@ -34,7 +34,7 @@ public class AppointmentController {
     @Operation(summary = "订单详情", description = "按订单号查询；校验归属防止越权",
         security = @SecurityRequirement(name = "bearerAuth"))
     @GetMapping("/{id}")
-    public Result<org.nearslot.appointment.entity.AppointmentOrder> detail(@PathVariable("id") Long id) {
+    public Result<org.nearslot.appointment.dto.AppointmentView> detail(@PathVariable("id") Long id) {
         return Result.ok(appointmentService.queryOrder(UserHolder.get(), id));
     }
 
@@ -42,7 +42,7 @@ public class AppointmentController {
     @Operation(summary = "我的订单", description = "按状态过滤，游标分页",
         security = @SecurityRequirement(name = "bearerAuth"))
     @GetMapping
-    public Result<java.util.List<org.nearslot.appointment.entity.AppointmentOrder>> myOrders(
+    public Result<java.util.List<org.nearslot.appointment.dto.AppointmentView>> myOrders(
             @RequestParam(value = "status", required = false) Integer status) {
         return Result.ok(appointmentService.listMyOrders(UserHolder.get(), status));
     }

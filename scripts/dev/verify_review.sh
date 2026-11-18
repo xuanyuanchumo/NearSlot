@@ -43,7 +43,8 @@ ck "非本店商家回复被拒(403)" "$(curl -s -o /dev/null -w "%{http_code}" 
 ck "本店商家可回复" "$(curl -s -X POST "$B/reviews/$RID/reply" -H "$HM" -H "Content-Type: application/json" -d '{"reply":"感谢反馈"}' | python -c "import sys,json;print(json.load(sys.stdin)['code'])")" "200"
 ck "回复已展示" "$(curl -s "$B/reviews/shops/1" | python -c "import sys,json;d=json.load(sys.stdin)['data']['items'][0];print('yes' if d['merchantReply'] else 'no')")" "yes"
 ck "撤回评价" "$(curl -s -X DELETE "$B/reviews/$RID" -H "$H" | python -c "import sys,json;print(json.load(sys.stdin)['code'])")" "200"
-ck "评分已回滚" "$(MQ "select concat(rating_avg,'/',rating_count) from nearslot.technician where id=1")" "500/0"
+# 评审 MAJOR-1 语义变更：撤到 0 条 -> 0 表示"未评级"，不再回落 500（防差评技师被抬成满分）
+ck "评分已清零(0=未评级)" "$(MQ "select concat(rating_avg,'/',rating_count) from nearslot.technician where id=1")" "0/0"
 echo "=========="; echo "PASS=$pass FAIL=$fail"
 # 评审 E-002：此前只 echo FAIL 不 exit，CI/自动流程里失败也算成功（假绿门禁）
 if [ "$fail" -gt 0 ]; then exit 1; fi

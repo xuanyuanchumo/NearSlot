@@ -30,6 +30,7 @@ class OrderQueryImplTest {
     private AppointmentOrder order(int status) {
         AppointmentOrder o = new AppointmentOrder();
         o.setId(100L); o.setSlotId(1L); o.setShopId(1L);
+        o.setUserId(1001L);
         o.setServiceStaffId(2001L); o.setStatus(status); o.setAmountCent(9900);
         o.setFulfillmentMode("DOOR_TO_DOOR");
         return o;
@@ -38,7 +39,7 @@ class OrderQueryImplTest {
     @Test
     @DisplayName("归属校验通过 -> 返回视图")
     void byIdOwned() {
-        when(appointmentService.queryOrder(1001L, 100L)).thenReturn(order(2));
+        when(orderMapper.selectById(100L)).thenReturn(order(2));
         var v = impl.byId(1001L, 100L);
         assertNotNull(v);
         assertEquals(100L, v.orderId());
@@ -48,15 +49,15 @@ class OrderQueryImplTest {
     @Test
     @DisplayName("归属不符 -> 返回 null（不泄露订单存在性）")
     void byIdNotOwned() {
-        when(appointmentService.queryOrder(1001L, 100L))
-            .thenThrow(new RuntimeException("forbidden"));
-        assertNull(impl.byId(1001L, 100L));
+        when(orderMapper.selectById(100L)).thenReturn(order(2));
+        // 归属不符：order.userId=1001L，调用者是 2002L -> null
+        assertNull(impl.byId(2002L, 100L));
     }
 
     @Test
     @DisplayName("查无此单 -> null")
     void byIdMissing() {
-        when(appointmentService.queryOrder(anyLong(), anyLong())).thenReturn(null);
+        when(orderMapper.selectById(anyLong())).thenReturn(null);
         assertNull(impl.byId(1L, 2L));
     }
 
