@@ -7,18 +7,22 @@ target/
 *.sha1
 _remote.repositories
 *.lastUpdated
-com/
-org/
-io/
-net/
-ch/
-junit/
-javax/
-jakarta/
-classworlds/
-commons-*/
-tools/jackson/
-redis/clients/
+# 以下规则必须**锚定仓库根**（前导 /）：原写法 com/ org/ io/ net/ 是"任意层级匹配"，
+# 会命中 Java 包根路径 src/main/java/org/... —— 导致规则生效后新增的所有 Java 文件
+# 被静默忽略（2026-11-18 实测：14 个源文件从未入库，CI 直接编译失败）。
+# 它们本意只是忽略"被误解析到项目根的 Maven 本地仓库"（group-id 目录）。
+/com/
+/org/
+/io/
+/net/
+/ch/
+/junit/
+/javax/
+/jakarta/
+/classworlds/
+/commons-*/
+/tools/jackson/
+/redis/clients/
 
 !.mvn/wrapper/maven-wrapper.jar
 .flattened-pom.xml

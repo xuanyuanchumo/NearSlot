@@ -43,6 +43,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21', cache: maven }
+      - name: 源码完整性门禁（防 .gitignore 误伤 Java 包路径）
+        run: |
+          # 2026-11-18 实测事故：.gitignore 里未锚定的 `org/` 命中了 src/main/java/org/，
+          # 导致规则生效后新增的 14 个源文件**从未入库**，本地能编译、CI 直接失败。
+          # 这里把"源码是否被忽略"变成门禁：只要有 src 下的 .java 被忽略就失败。
+          ignored=$(git status --ignored --porcelain=v1 | grep -E '^!! .*/src/.*\.java$' || true)
+          if [ -n "$ignored" ]; then
+            echo "::error::以下源码被 .gitignore 忽略，不会进入仓库（CI/他人无法编译）："
+            echo "$ignored"
+            exit 1
+          fi
+          echo "源码完整性 OK：src 下没有 .java 被忽略"
       - name: 编译 + 单测（排除 integration 标签）
         run: mvn -B compile test -DexcludedGroups=integration
       - name: 覆盖率门槛（G4：行覆盖 ≥ 80%）
