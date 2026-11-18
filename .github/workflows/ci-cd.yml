@@ -133,18 +133,35 @@ jobs:
             echo "首次生成 api/openapi.json（基线）"
           fi
       - name: 契约需随 PR 入库（语义比较）
-        # 不能用 git diff --cached --quiet：CI 生成契约时未 sort_keys，
-        # 与仓库中格式化的版本字节不同但**语义完全一致**（2026-11-19 实测，
-        # artifact 下载后 json.loads 相等）。门禁只关心语义变更。
+        # 门禁语义：仓库中的 api/openapi.json 必须与代码实际产出的契约**语义一致**。
+        #
+        # 两个必须遵守的点（都踩过）：
+        # 1. 不能用 git diff --cached --quiet 比字节：CI 序列化格式与仓库格式化版本不同，
+        #    语义相等却判失败（2026-11-19 实测 artifact 下载后 json.loads 相等）。
+        # 2. **不能读工作区的 api/openapi.json**：上一步「启动应用生成 OpenAPI」已把它覆盖成
+        #    本次生成结果，再拿它当"已提交版本"比较则两边恒等，门禁变成永真（2026-11-19 实测发现）。
+        #    必须从 git HEAD 取**真正提交入库**的版本。
         run: |
           python3 - <<'PY'
           import json, subprocess, sys
-          committed = json.load(open("api/openapi.json", encoding="utf-8"))
-          generated = json.load(open("/tmp/openapi.json", encoding="utf-8"))
+          raw = subprocess.run(['git', 'show', 'HEAD:api/openapi.json'],
+                               capture_output=True, text=True).stdout
+          if not raw.strip():
+              print("首次生成 api/openapi.json（基线），跳过一致性比较")
+              sys.exit(0)
+          committed = json.loads(raw)          # 真正入库的版本
+          generated = json.load(open('/tmp/openapi.json', encoding='utf-8'))  # 本次代码产出
           if committed != generated:
-              old = set((committed.get("paths") or {}).keys())
-              new = set((generated.get("paths") or {}).keys())
-              print("::error::契约语义有变更：新增", sorted(new - old), "删除", sorted(old - new))
+              c_paths, g_paths = committed.get('paths') or {}, generated.get('paths') or {}
+              added = sorted(set(g_paths) - set(c_paths))
+              removed = sorted(set(c_paths) - set(g_paths))
+              print("::error::契约与入库版本语义不一致，请重新生成并提交 api/openapi.json")
+              print("  新增路径:", added)
+              print("  删除路径:", removed)
+              old_title = (committed.get('info') or {}).get('title')
+              new_title = (generated.get('info') or {}).get('title')
+              if old_title != new_title:
+                  print(f"  info.title 变更: {old_title!r} -> {new_title!r}")
               sys.exit(1)
           print("契约语义一致（格式化差异忽略）")
           PY
