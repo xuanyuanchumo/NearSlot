@@ -55,7 +55,8 @@ class TechnicianSkillManageTest {
         publisher = mock(CacheInvalidationPublisher.class);
         cacheManager = mock(CacheManager.class);
         service = new ShopAdminService(shopMapper, technicianMapper, serviceItemMapper,
-            mock(BloomFilterHandler.class), publisher, cacheManager, skillMapper);
+            mock(BloomFilterHandler.class), publisher, cacheManager, skillMapper,
+            mock(org.nearslot.shop.service.ShopService.class));
         UserHolder.set(1001L);
         UserHolder.setRole("PLATFORM");
     }

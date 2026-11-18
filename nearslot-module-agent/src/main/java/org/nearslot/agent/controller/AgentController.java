@@ -10,6 +10,8 @@ import org.nearslot.agent.plan.TwoPhasePlanner;
 import org.nearslot.agent.sse.SseEvent;
 import org.nearslot.common.Result;
 import org.nearslot.common.enums.BaseCode;
+import org.nearslot.common.exception.BaseException;
+import org.nearslot.common.exception.BaseException;
 import org.nearslot.common.context.UserHolder;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -92,11 +94,27 @@ public class AgentController {
         return emitter;
     }
 
-    @Operation(summary = "确认敏感操作", description = "携带 confirmToken 执行被挂起的操作")
+    @Operation(summary = "确认敏感操作", description = "携带 confirmToken **真正执行**被挂起的操作")
     @PostMapping("/confirm")
-    public Result<Boolean> confirm(@RequestBody Map<String, String> body) {
+    public Result<java.util.Map<String, Object>> confirm(@RequestBody Map<String, String> body) {
         Long userId = UserHolder.get();
         String token = body == null ? null : body.get("confirmToken");
-        return Result.ok(confirmTokenService.consume(userId, token));
+        // 评审 D-002：此前只 consume 令牌返回 true，从不执行任何操作——
+        // 用户点"确认"后什么也没发生，属于功能性断链。
+        String instruction = confirmTokenService.consumeAndGet(userId, token);
+        if (instruction == null) {
+            throw new BaseException(BaseCode.UNAUTHORIZED, "确认令牌无效或已过期");
+        }
+        // 用与 /chat 完全相同的规划+执行链路，保证确认后行为一致
+        TwoPhasePlanner.Plan plan = planner.plan(instruction);
+        java.util.List<String> results = new java.util.ArrayList<>();
+        for (TwoPhasePlanner.PlanStep step : plan.steps()) {
+            results.add(step.tool() + ": " + planner.execute(step, userId, instruction));
+        }
+        log.info("确认操作已执行 userId={} steps={}", userId, results.size());
+        return Result.ok(java.util.Map.of(
+            "executed", true,
+            "instruction", instruction,
+            "steps", results));
     }
 }

@@ -33,6 +33,7 @@ public class ReviewProperties {
     /** 商家回复字数上限。 */
     private int maxReplyLength = 1000;
 
-    /** 无评分时的默认均分（放大 100 倍，500 = 5.00，与 technician.rating_avg 默认值一致）。 */
-    private int defaultRatingAvg = 500;
+    // 注意：评分范围 1..5 是**领域不变式**（1星到5星），不是运营参数。
+    // 它由 TechnicianRatingUpdaterImpl 的 MIN_AVG/MAX_AVG 与 Controller 的 @Min/@Max 固定，
+    // 不提供配置项——避免"配了 rating-min=0 却仍然被拒"的假配置（评审 MAJOR-2）。
 }

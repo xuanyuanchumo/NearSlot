@@ -41,6 +41,29 @@ public class ConfirmTokenService {
         return token;
     }
 
+    /**
+     * 消费令牌并返回被挂起的原始指令（一次性）。
+     * 评审 D-002：只有 consume() 返回 bool 无法知道"要执行什么"，确认流程必然落空。
+     *
+     * @return 原始指令；令牌无效/归属不符/已消费返回 null
+     */
+    public String consumeAndGet(Long userId, String token) {
+        if (token == null || token.isBlank()) return null;
+        String k = key(token);
+        String v = redis.opsForValue().get(k);
+        if (v == null) return null;
+        int idx = v.indexOf(":");
+        if (idx <= 0) return null;
+        String owner = v.substring(0, idx);
+        if (!String.valueOf(userId).equals(owner)) {
+            log.warn("确认令牌归属不符 userId={} owner={}", userId, owner);
+            return null;
+        }
+        // 先删后返回：一次性语义，防止并发重放
+        redis.delete(k);
+        return v.substring(idx + 1);
+    }
+
     /** 消费令牌（一次性）。true=校验通过并已作废。 */
     public boolean consume(Long userId, String token) {
         if (token == null || token.isBlank()) return false;

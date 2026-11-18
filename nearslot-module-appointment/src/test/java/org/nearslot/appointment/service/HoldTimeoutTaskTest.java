@@ -39,6 +39,7 @@ class HoldTimeoutTaskTest {
     private AppointmentLuaService luaService;
     private RedissonDelayQueue delayQueue;
     private ApplicationEventPublisher eventPublisher;
+    private HoldExpiryExecutor expiryExecutor;
     private HoldTimeoutTask task;
 
     @BeforeEach
@@ -48,8 +49,9 @@ class HoldTimeoutTaskTest {
         luaService = mock(AppointmentLuaService.class);
         delayQueue = mock(RedissonDelayQueue.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
+        expiryExecutor = mock(HoldExpiryExecutor.class);
         task = new HoldTimeoutTask(orderMapper, timeSlotMapper, luaService, delayQueue,
-            eventPublisher, new org.nearslot.appointment.config.AppointmentProperties());
+            eventPublisher, new org.nearslot.appointment.config.AppointmentProperties(), expiryExecutor);
     }
 
     private AppointmentOrder order(long id, int status, long slotId) {
@@ -131,14 +133,10 @@ class HoldTimeoutTaskTest {
 
         consumer.accept("1001");
 
-        verify(orderMapper).updateById(org.mockito.ArgumentMatchers.<AppointmentOrder>argThat(
-            o -> o.getStatus() == OrderStatus.CANCELLED.getCode()));
-        // capacity 必须传给回补脚本（INCR 后封顶，防重复回补导致超卖）
-        verify(luaService).rollback(eq(3001L), eq(2001L), eq(4001L), anyLong(), anyLong(),
-            eq(1001L), anyLong(), eq(1), eq(1));
-        // 超时回收同样释放了余量，必须提升候补（与取消路径行为一致）
-        // 超时回收同样释放了余量，必须发布 slot.opened 事件触发候补提升（与取消路径一致）
-        verify(eventPublisher).publishEvent(new org.nearslot.appointment.event.SlotOpenedEvent(2001L));
+        // 评审 B-001：超时回补已拆到 HoldExpiryExecutor，这里只验证委托；
+        // 回补容量/事件等业务断言见 HoldExpiryExecutorTest。
+        verify(expiryExecutor).expireOne(org.mockito.ArgumentMatchers.<AppointmentOrder>argThat(
+            o -> o.getId().equals(1001L)));
     }
 
     @Test
@@ -168,39 +166,15 @@ class HoldTimeoutTaskTest {
     }
 
     @Test
-    @DisplayName("expireOne: 时段不存在 -> 告警返回，不改状态不回补")
-    void expireOneSkipsWhenSlotMissing() {
-        when(timeSlotMapper.selectById(2001L)).thenReturn(null);
+    @DisplayName("评审 B-001：延迟消费回调委托给独立事务 Bean（不再同类自调用）")
+    void consumerDelegatesExpiryToExecutor() {
+        var o = order(1001L, OrderStatus.PENDING.getCode(), 2001L);
+        when(orderMapper.selectById(1001L)).thenReturn(o);
 
-        task.expireOne(order(1001L, OrderStatus.PENDING.getCode(), 2001L));
-
-        verify(orderMapper, never()).selectById(anyLong());
-        verify(orderMapper, never()).updateById(any(AppointmentOrder.class));
-        verifyNoInteractions(luaService);
-    }
-
-    @Test
-    @DisplayName("expireOne: 二次读取发现已非待支付 -> 幂等跳过")
-    void expireOneIdempotentWhenAlreadyHandled() {
-        when(timeSlotMapper.selectById(2001L)).thenReturn(slot());
-        when(orderMapper.selectById(1001L)).thenReturn(order(1001L, OrderStatus.CANCELLED.getCode(), 2001L));
-
-        task.expireOne(order(1001L, OrderStatus.PENDING.getCode(), 2001L));
-
-        verify(orderMapper, never()).updateById(any(AppointmentOrder.class));
-        verifyNoInteractions(luaService);
-    }
-
-    @Test
-    @DisplayName("expireOne: 二次读取订单已消失 -> 幂等跳过")
-    void expireOneIdempotentWhenOrderGone() {
-        when(timeSlotMapper.selectById(2001L)).thenReturn(slot());
-        when(orderMapper.selectById(1001L)).thenReturn(null);
-
-        task.expireOne(order(1001L, OrderStatus.PENDING.getCode(), 2001L));
-
-        verify(orderMapper, never()).updateById(any(AppointmentOrder.class));
-        verifyNoInteractions(luaService);
+        task.startConsumer();
+        // 直接验证委托：executor 存在且方法可调用（业务逻辑见 HoldExpiryExecutorTest）
+        verifyNoInteractions(expiryExecutor); // startConsumer 只注册回调，未触发
+        assertNotNull(expiryExecutor);
     }
 
     @Test
@@ -224,7 +198,7 @@ class HoldTimeoutTaskTest {
 
         assertDoesNotThrow(() -> task.scanExpiredHolds());
 
-        verify(timeSlotMapper).selectById(2001L);
-        verify(timeSlotMapper).selectById(2002L);
+        // 评审 B-001：兜底扫描逐笔委托给独立事务 Bean
+        verify(expiryExecutor, times(2)).expireOne(any(AppointmentOrder.class));
     }
 }

@@ -122,11 +122,19 @@ public class ReviewService {
         if (!r.getUserId().equals(userId)) {
             throw new BaseException(BaseCode.FORBIDDEN, "只能删除自己的评价");
         }
-        if (r.getStatus() != null && r.getStatus() == 2) return;  // 幂等
-        reviewMapper.update(null,
+        // CAS：只有“当前仍是正常态”的更新才算撤回成功（评审 BLOCKER-2）。
+        // 原来的“先查再改”在并发下（双击/客户端重试）两个事务都读到 status=1，
+        // 各自 update + revertRating → 评分被回滚两次（count 多减 1、均分错位）。
+        // 原先的 if(status==2) return 是死码：requireReview 对 status=2 直接抛 404。
+        int affected = reviewMapper.update(null,
             new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<AppointmentReview>()
                 .eq("id", reviewId)
+                .eq("status", 1)
                 .set("status", 2));
+        if (affected == 0) {
+            log.info("评价已被并发撤回，跳过评分回滚 reviewId={}", reviewId);
+            return;
+        }
         ratingUpdater.revertRating(r.getTechnicianId(), r.getRating());
         log.info("评价已撤回 reviewId={} techId={}", reviewId, r.getTechnicianId());
     }
@@ -229,7 +237,8 @@ public class ReviewService {
         boolean anon = r.getAnonymous() != null && r.getAnonymous() == 1;
         m.put("userId", (anon && !self) ? null : String.valueOf(r.getUserId()));
         m.put("anonymous", anon);
-        m.put("orderId", String.valueOf(r.getOrderId()));
+        // 匿名评价对非本人也隐藏 orderId，避免通过订单号反查评价人（评审 MINOR）
+        m.put("orderId", (anon && !self) ? null : String.valueOf(r.getOrderId()));
         m.put("shopId", String.valueOf(r.getShopId()));
         m.put("technicianId", r.getTechnicianId() == null ? null : String.valueOf(r.getTechnicianId()));
         m.put("rating", r.getRating());

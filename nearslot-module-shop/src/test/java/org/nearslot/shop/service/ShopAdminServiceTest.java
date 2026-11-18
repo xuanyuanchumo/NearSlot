@@ -57,7 +57,7 @@ class ShopAdminServiceTest {
         when(publisher.publish(anyString())).thenReturn(true);
         cacheManager = mock(CacheManager.class);
         service = new ShopAdminService(shopMapper, technicianMapper, serviceItemMapper,
-            bloomFilter, publisher, cacheManager, skillMapper);
+            bloomFilter, publisher, cacheManager, skillMapper, mock(org.nearslot.shop.service.ShopService.class));
     }
 
     @AfterEach

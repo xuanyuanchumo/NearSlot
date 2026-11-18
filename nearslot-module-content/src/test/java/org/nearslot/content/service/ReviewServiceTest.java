@@ -212,6 +212,8 @@ class ReviewServiceTest {
         r.setRating(4);
         r.setStatus(1);
         when(reviewMapper.selectById(1L)).thenReturn(r);
+        // CAS 更新须返回影响行数 1；默认 0 会被判定为"已被并发撤回"（评审 BLOCKER-2 的正确行为）
+        when(reviewMapper.update(isNull(), any())).thenReturn(1);
 
         service.delete(1001L, 1L);
 
@@ -220,7 +222,7 @@ class ReviewServiceTest {
     }
 
     @Test
-    @DisplayName("delete: 已删除 -> 幂等，不重复回滚")
+    @DisplayName("delete: 已删除 -> 404（requireReview 阶段拦截，不是 if 分支）")
     void deleteIsIdempotent() {
         AppointmentReview r = new AppointmentReview();
         r.setId(1L);

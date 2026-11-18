@@ -89,7 +89,31 @@ public class AppointmentService {
             // 越权访问：不暴露订单是否存在，统一按 NOT_FOUND
             throw new BaseException(BaseCode.NOT_FOUND);
         }
-        return o;
+        return enrich(java.util.List.of(o)).get(0);
+    }
+
+    /**
+     * 回填前端展示字段（评审 F-008）。
+     *
+     * 前端 types/api.ts 的 Appointment 要求 startsAt/tzId/amountCents，
+     * 而后端实体只有 amountCent 与 slotId。这里批量从 TimeSlot 补时间字段，
+     * 并做金额双字段兼容，避免"我的预约"页时间与金额恒空。
+     * shopName/technicianName 是前端可选字段，超出本模块边界（需 common 契约），
+     * 暂不回填，登记 backlog。
+     */
+    private java.util.List<AppointmentOrder> enrich(java.util.List<AppointmentOrder> orders) {
+        if (orders == null || orders.isEmpty()) return orders;
+        for (AppointmentOrder o : orders) {
+            if (o.getAmountCents() == null) o.setAmountCents(o.getAmountCent());
+            if (o.getSlotId() != null) {
+                TimeSlot slot = timeSlotMapper.selectById(o.getSlotId());
+                if (slot != null) {
+                    o.setStartsAt(slot.getStartsAt());
+                    o.setTzId(slot.getTzId());
+                }
+            }
+        }
+        return orders;
     }
 
     /** 我的订单列表（FR-4.1），按创建时间倒序。 */
@@ -98,7 +122,7 @@ public class AppointmentService {
             .eq(AppointmentOrder::getUserId, userId);
         if (status != null) q.eq(AppointmentOrder::getStatus, status);
         q.orderByDesc(AppointmentOrder::getId).last("LIMIT " + props.getMyOrdersLimit());
-        return orderMapper.selectList(q);
+        return enrich(orderMapper.selectList(q));
     }
 
     /** 取消：状态 CAS → 回补反转 → 触发候补。 */

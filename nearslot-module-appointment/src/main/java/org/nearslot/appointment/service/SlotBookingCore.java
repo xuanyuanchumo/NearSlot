@@ -41,6 +41,8 @@ public class SlotBookingCore {
     private final AppointmentOrderMapper orderMapper;
     private final ReconcileService reconcileService;
     private final HoldTimeoutTask holdTimeoutTask;
+    /** 评审 B-001：落单事务必须在独立 Bean，经 Spring 代理调用才生效。 */
+    private final HoldPersistence holdPersistence;
     /** Hold 窗口等策略外置到 `nearslot.appointment.*`（必须大于支付 P99，research/08 §4）。 */
     private final org.nearslot.appointment.config.AppointmentProperties props;
 
@@ -69,7 +71,8 @@ public class SlotBookingCore {
             throw new BaseException(BaseCode.of(r.getCode()));
         }
         try {
-            persistHold(userId, slot, orderId);
+            // 评审 B-001：经独立 Bean 调用，@Transactional 才真正生效（同类自调用不经过代理）
+            holdPersistence.persistHold(userId, slot, orderId);
             // 主路径：投递 Hold 超时延迟消息（幂等回收由 HoldTimeoutTask 保证）
             AppointmentOrder created = new AppointmentOrder();
             created.setId(orderId);
@@ -87,22 +90,6 @@ public class SlotBookingCore {
         log.info("book ok userId={} slotId={} orderId={} traceId={} before={} after={}",
             userId, slotId, orderId, traceId, r.getBeforeQty(), r.getAfterQty());
         return orderId;
-    }
-
-    /** 落 Hold 待支付单。public + 独立 Bean：事务边界真实生效。 */
-    @Transactional(rollbackFor = Exception.class)
-    public void persistHold(Long userId, TimeSlot slot, Long orderId) {
-        AppointmentOrder o = new AppointmentOrder();
-        o.setId(orderId);
-        o.setUserId(userId);
-        o.setSlotId(slot.getId());
-        o.setShopId(slot.getShopId());
-        o.setServiceStaffId(slot.getServiceStaffId());
-        if (o.getFulfillmentMode() == null) o.setFulfillmentMode("DOOR_TO_DOOR");
-        o.setStatus(OrderStatus.PENDING.getCode());
-        o.setAmountCent(0);
-        o.setHoldExpiresAt(LocalDateTime.now().plusMinutes(props.getHoldMinutes()));
-        orderMapper.insert(o);
     }
 
     /** Hold 窗口秒数（供延迟队列排期）。 */

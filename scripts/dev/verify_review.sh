@@ -45,3 +45,6 @@ ck "回复已展示" "$(curl -s "$B/reviews/shops/1" | python -c "import sys,jso
 ck "撤回评价" "$(curl -s -X DELETE "$B/reviews/$RID" -H "$H" | python -c "import sys,json;print(json.load(sys.stdin)['code'])")" "200"
 ck "评分已回滚" "$(MQ "select concat(rating_avg,'/',rating_count) from nearslot.technician where id=1")" "500/0"
 echo "=========="; echo "PASS=$pass FAIL=$fail"
+# 评审 E-002：此前只 echo FAIL 不 exit，CI/自动流程里失败也算成功（假绿门禁）
+if [ "$fail" -gt 0 ]; then exit 1; fi
+exit 0

@@ -135,8 +135,6 @@ nearslot:
     max-content-length: 1000
     max-images: 9
     max-reply-length: 1000
-    # 无评分时的默认均分（放大 100 倍，500 = 5.00）
-    default-rating-avg: 500
   shop:
     # 列表分页：默认与上限
     default-page-size: 10

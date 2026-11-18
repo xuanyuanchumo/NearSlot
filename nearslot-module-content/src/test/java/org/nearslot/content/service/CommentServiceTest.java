@@ -115,6 +115,8 @@ class CommentServiceTest {
         c.setBlogId(7001L);
         c.setStatus(1);
         when(commentMapper.selectById(8001L)).thenReturn(c);
+        // 评审 A-003：CAS 更新须返回影响行数 1，否则被判为并发已删
+        when(commentMapper.update(isNull(), any())).thenReturn(1);
 
         service.remove(1001L, 8001L);
 
@@ -131,9 +133,12 @@ class CommentServiceTest {
         c.setBlogId(7001L);
         c.setStatus(2);
         when(commentMapper.selectById(8001L)).thenReturn(c);
+        // status=2 时 CAS（eq status=1）影响 0 行，不减计数
+        when(commentMapper.update(isNull(), any())).thenReturn(0);
 
         service.remove(1001L, 8001L);
 
-        verify(commentMapper, never()).update(any(), any());
+        // CAS 仍会执行一次条件更新，但不得再扣减 blog 计数
+        verify(blogMapper, never()).update(any(), any());
     }
 }

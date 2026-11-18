@@ -29,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class TechnicianRatingUpdaterImpl implements TechnicianRatingUpdater {
 
     private static final int SCALE = 100;
+    /** 评分区间 1..5（放大 100 倍）——领域不变式，不随运营调参变化。 */
+    private static final int MIN_AVG = SCALE * 1;
+    private static final int MAX_AVG = SCALE * 5;
 
     private final TechnicianMapper technicianMapper;
 
@@ -46,7 +49,7 @@ public class TechnicianRatingUpdaterImpl implements TechnicianRatingUpdater {
         int newCount = oldCount + 1;
         // 增量均值：新均分 = (旧均分*旧数 + 本次*100) / 新数
         long newAvg = Math.round((oldAvg * oldCount + (long) score * SCALE) / (double) newCount);
-        write(technicianId, (int) newAvg, newCount);
+        write(technicianId, clamp((int) newAvg), newCount);
         log.info("评分入账 technicianId={} score={} {}->{} count {}->{}",
             technicianId, score, oldAvg, newAvg, oldCount, newCount);
     }
@@ -61,12 +64,19 @@ public class TechnicianRatingUpdaterImpl implements TechnicianRatingUpdater {
         if (oldCount <= 0) return;
         long oldAvg = t.getRatingAvg() == null ? 0 : t.getRatingAvg();
         int newCount = oldCount - 1;
-        // 撤到 0 条时回落默认满分基准，避免 (除零 / 负数)
-        int newAvg = newCount == 0 ? SCALE * 5
+        // 撤到 0 条 -> 0 表示“未评级”。原先回落 500(5.00) 会把只有差评的技师
+        // 在撤回后“抬成满分”，属于误导性展示（评审 MAJOR-1）。
+        int newAvg = newCount == 0 ? 0
             : (int) Math.round((oldAvg * oldCount - (long) score * SCALE) / (double) newCount);
-        write(technicianId, Math.max(0, newAvg), newCount);
+        // 舍入累积会让均值漂出 [1.00,5.00]（评审实测 5,5,1 撤 1 分算出 501），必须钳制
+        write(technicianId, newCount == 0 ? 0 : clamp(newAvg), newCount);
         log.info("评分撤销 technicianId={} score={} {}->{} count {}->{}",
             technicianId, score, oldAvg, newAvg, oldCount, newCount);
+    }
+
+    /** 钳制到 [1.00, 5.00]（放大 100 倍后的整数区间）。 */
+    private int clamp(int avg) {
+        return Math.max(MIN_AVG, Math.min(MAX_AVG, avg));
     }
 
     /** 行锁读取（并发评价串行化的关键）。 */

@@ -51,6 +51,8 @@ public class ShopAdminService {
     private final CacheInvalidationPublisher invalidationPublisher;
     private final CacheManager cacheManager;
     private final TechnicianSkillMapper technicianSkillMapper;
+    /** 维护 GEO 索引（评审 D-003：addGeo 此前只有定义、无任何调用，nearby 恒空）。 */
+    private final ShopService shopService;
 
     // ---------- 服务商 ----------
     @Transactional(rollbackFor = Exception.class)
@@ -59,6 +61,10 @@ public class ShopAdminService {
         shop.setId(IdGenerator.nextId());
         shopMapper.insert(shop);
         bloomFilter.put("shop", String.valueOf(shop.getId()));
+        // D-003：新店写入 GEO 索引，否则 /shops/nearby 永远查不到它
+        if (shop.getX() != null && shop.getY() != null) {
+            shopService.addGeo(shop.getId(), shop.getX(), shop.getY());
+        }
         afterChange(shop.getId());
         log.info("服务商已创建 shopId={}", shop.getId());
         return shop.getId();
@@ -69,6 +75,10 @@ public class ShopAdminService {
         requireShopOwner(shop.getId());
         requireExists(shop.getId(), shopMapper.selectById(shop.getId()));
         shopMapper.updateById(shop);
+        // D-003：坐标可能变化，更新 GEO 索引（addGeo 对同一 member 是覆盖写）
+        if (shop.getX() != null && shop.getY() != null) {
+            shopService.addGeo(shop.getId(), shop.getX(), shop.getY());
+        }
         afterChange(shop.getId());
     }
 

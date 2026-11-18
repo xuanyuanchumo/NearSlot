@@ -22,3 +22,6 @@ curl -s -X POST $B/points/sign -H "$H" >/dev/null
 ck "签到幂等(第二次)" "$(curl -s -X POST $B/points/sign -H "$H" | python -c "import sys,json;print(json.load(sys.stdin)['data']['fresh'])")" "False"
 ck "关注流可用" "$(curl -s "$B/feed" -H "$H" | python -c "import sys,json;print(json.load(sys.stdin)['code'])")" "200"
 echo "=========="; echo "PASS=$pass FAIL=$fail"
+# 评审 E-002：此前只 echo FAIL 不 exit，CI/自动流程里失败也算成功（假绿门禁）
+if [ "$fail" -gt 0 ]; then exit 1; fi
+exit 0

@@ -60,6 +60,8 @@ public class LoginService {
     private final RedissonRateLimiter rateLimiter;
     private final StringRedisTemplate redis;
     private final BCryptPasswordEncoder passwordEncoder;
+    /** 评审 C-004：风控参数此前写死在 RedisConstants，改 yaml 不生效；现统一读配置。 */
+    private final org.nearslot.auth.config.AuthProperties authProps;
 
     /** 登录：按 type 分流密码 / 验证码。 */
     public LoginResponse login(LoginRequest req, String clientIp) {
@@ -108,7 +110,9 @@ public class LoginService {
         long version = tokenService.bumpVersion(user.getId());
         TokenService.TokenPair pair = tokenService.generateTokenPair(user.getId(), version);
         log.info("login ok userId={} level={} type={} ip={}", user.getId(), user.getLevel(), type, clientIp);
-        return new LoginResponse(pair.accessToken(), String.valueOf(user.getId()), user.getLevel());
+        LoginResponse res = new LoginResponse(
+            pair.accessToken(), String.valueOf(user.getId()), user.getLevel(), pair.refreshToken());
+        return res;
     }
 
     /** 密码校验：BCrypt 优先，旧哈希成功后自动升级。 */
@@ -174,9 +178,9 @@ public class LoginService {
             String key = RedisConstants.LOGIN_FAIL_IP + phone;
             Long count = redis.opsForValue().increment(key);
             if (count != null && count == 1L) {
-                redis.expire(key, RedisConstants.TTL_FAIL_IP, TimeUnit.SECONDS);
+                redis.expire(key, authProps.getFailIpTtlSeconds(), TimeUnit.SECONDS);
             }
-            return count == null || count <= RedisConstants.MAX_FAIL_IP;
+            return count == null || count <= authProps.getMaxFailIp();
         } catch (RuntimeException e) {
             log.warn("账号维度频控不可用，本次放行 phone={}", maskPhone(phone));
             return true;
@@ -197,11 +201,11 @@ public class LoginService {
         String failKey = RedisConstants.LOGIN_FAIL_COUNT + phone;
         Long fails = redis.opsForValue().increment(failKey);
         if (fails != null && fails == 1L) {
-            redis.expire(failKey, RedisConstants.TTL_FAIL_COUNT, TimeUnit.SECONDS);
+            redis.expire(failKey, authProps.getFailCountTtlSeconds(), TimeUnit.SECONDS);
         }
-        if (fails != null && fails >= RedisConstants.MAX_FAIL_COUNT) {
+        if (fails != null && fails >= authProps.getMaxFailCount()) {
             redis.opsForValue().set(RedisConstants.LOGIN_LOCK + phone, "1",
-                RedisConstants.TTL_LOGIN_LOCK, TimeUnit.SECONDS);
+                authProps.getLoginLockTtlSeconds(), TimeUnit.SECONDS);
             redis.delete(failKey);
             log.warn("账户连续登录失败被锁定 phone={}", phone);
         }
@@ -247,6 +251,7 @@ public class LoginService {
 
     /** 下发验证码（写入 Redis 60s）。 */
     public void issueCode(String phone, String code) {
-        redis.opsForValue().set(RedisConstants.LOGIN_CODE + phone, code, 60, TimeUnit.SECONDS);
+        redis.opsForValue().set(RedisConstants.LOGIN_CODE + phone, code,
+            authProps.getLoginCodeTtlSeconds(), TimeUnit.SECONDS);
     }
 }

@@ -91,19 +91,21 @@ class AgentControllerTest {
     }
 
     @Test
-    @DisplayName("confirm 端点 -> 委托令牌服务消费")
-    void confirmEndpointDelegates() {
-        when(tokenService.consume(1001L, "tok")).thenReturn(true);
+    @DisplayName("评审 D-002：confirm 端点消费令牌并真正执行被挂起的操作")
+    void confirmExecutesPendingOperation() {
+        when(tokenService.consumeAndGet(1001L, "tok")).thenReturn("取消我的预约");
+        when(planner.plan("取消我的预约")).thenReturn(new TwoPhasePlanner.Plan(List.of()));
         var res = controller.confirm(Map.of("confirmToken", "tok"));
-        assertEquals(Boolean.TRUE, res.getData());
-        verify(tokenService).consume(1001L, "tok");
+        assertEquals(true, ((java.util.Map<?, ?>) res.getData()).get("executed"));
+        verify(tokenService).consumeAndGet(1001L, "tok");
+        verify(planner).plan("取消我的预约");
     }
 
     @Test
-    @DisplayName("confirm 端点：无令牌 -> 服务返回 false")
+    @DisplayName("confirm 端点：无令牌 -> 401（不再返回 false 假成功）")
     void confirmWithoutToken() {
-        when(tokenService.consume(eq(1001L), isNull())).thenReturn(false);
-        var res = controller.confirm(Map.of());
-        assertEquals(Boolean.FALSE, res.getData());
+        when(tokenService.consumeAndGet(eq(1001L), isNull())).thenReturn(null);
+        assertThrows(org.nearslot.common.exception.BaseException.class,
+            () -> controller.confirm(Map.of()));
     }
 }

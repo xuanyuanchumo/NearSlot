@@ -12,6 +12,8 @@ import org.nearslot.auth.dto.LoginResponse;
 import org.nearslot.auth.service.LoginService;
 import org.nearslot.auth.service.TokenService;
 import org.nearslot.common.Result;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
@@ -27,6 +29,8 @@ public class AuthController {
 
     private final LoginService loginService;
     private final TokenService tokenService;
+    /** 认证与风控参数（RT TTL 等）外置到 `nearslot.auth.*`。 */
+    private final org.nearslot.auth.config.AuthProperties props;
 
     @Operation(summary = "登录", description = "支持 password / code 两种类型；BCrypt 校验 + IP/账号双维度防爆破")
     @PostMapping("/login")
@@ -34,6 +38,18 @@ public class AuthController {
                                        HttpServletRequest request,
                                        HttpServletResponse response) {
         LoginResponse res = loginService.login(req, clientIp(request));
+        // 评审 D-001：TokenService 生成了 RT，但此前**从未交付给客户端**，
+        // 导致 /auth/refresh 永远拿不到 RT（前端 Cookie 与响应体都没有）。
+        // 用 HttpOnly + SameSite=Lax Cookie 下发：JS 读不到（防 XSS 窃取），
+        // 但浏览器会自动随同源请求携带；生产须加 Secure（由网关终止 TLS 时配置）。
+        String rt = res.getRefreshToken();
+        if (rt != null && !rt.isBlank()) {
+            ResponseCookie cookie = ResponseCookie.from("Refresh-Token", rt)
+                .httpOnly(true).secure(false).path("/api/v1/auth").sameSite("Lax")
+                .maxAge(props.getRefreshTtlSeconds())
+                .build();
+            response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+        }
         response.setHeader("X-Token-Refresh", "ok");
         return Result.ok(res);
     }
@@ -53,7 +69,7 @@ public class AuthController {
 
     @Operation(summary = "刷新令牌", description = "旧 RT 换新 AT；并发刷新由 422 自愈返回最新 AT")
     @PostMapping("/refresh")
-    public Result<String> refresh(@RequestHeader(value = "Refresh-Token", required = false) String rt,
+    public Result<RefreshResponse> refresh(@RequestHeader(value = "Refresh-Token", required = false) String rt,
                                   @CookieValue(value = "Refresh-Token", required = false) String cookieRt,
                                   HttpServletResponse response) {
         String refreshToken = (rt != null && !rt.isBlank()) ? rt : cookieRt;
@@ -64,7 +80,9 @@ public class AuthController {
         Long userId = tokenService.parseUserIdFromRefresh(refreshToken);
         String newAt = tokenService.refresh(userId, refreshToken);
         response.setHeader("X-Token-Refresh", "ok");
-        return Result.ok(newAt);
+        // 评审 F-007：前端 request.ts 按 body.data.accessToken 读取；
+        // 此前返回裸字符串导致刷新后 token 仍是 undefined。
+        return Result.ok(new RefreshResponse(newAt));
     }
 
     @Operation(summary = "修改密码", description = "校验原密码后改密，并 bump version 踢出所有旧会话")
@@ -87,6 +105,9 @@ public class AuthController {
         if (userId != null) tokenService.logout(userId);
         return Result.ok(null);
     }
+
+    /** 刷新响应（与前端 RefreshResult 契约一致）。 */
+    public record RefreshResponse(String accessToken) {}
 
     private Long currentUserId(HttpServletRequest request) {
         Object uid = request.getAttribute("userId");

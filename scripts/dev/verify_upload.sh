@@ -28,4 +28,7 @@ ck ".jsp 扩展名 40001" "$(curl -s -X POST $B/files -H "$H" -F "file=@$W/a.jsp
 ck "穿越读取 404" "$(curl -s -o /dev/null -w "%{http_code}" "$B/files/../../../../etc/passwd")" "404"
 ck "不存在 key 404" "$(curl -s -o /dev/null -w "%{http_code}" "$B/files/2026/01/01/none.png")" "404"
 echo "=========="; echo "PASS=$pass FAIL=$fail"
+# 评审 E-002：此前只 echo FAIL 不 exit，CI/自动流程里失败也算成功（假绿门禁）
+if [ "$fail" -gt 0 ]; then exit 1; fi
+exit 0
 rm -rf "$W"
