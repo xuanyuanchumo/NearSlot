@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
     <!-- 对话区 -->
     <section ref="answerRegion" class="ns-card ns-messages" aria-label="对话内容">
       <div v-if="messages.length === 0" class="ns-messages-empty">
-        <el-empty description="试试问我：明天下午附近有没有可预约的技师？" :image-size="80" />
+        <el-empty description="试试问我：明天下午附近有没有可预约的时段？" :image-size="80" />
       </div>
 
       <div
@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
         type="textarea"
         :rows="2"
         resize="none"
-        placeholder="描述你想要的时段，例如：明天下午 3 点后，离我 5 公里内的技师"
+        placeholder="描述你想要的时段，例如：明天下午 3 点后，离我 5 公里内的服务商"
         :disabled="streaming"
         @keydown.enter.exact.prevent="handleSend"
       />

@@ -1294,7 +1294,7 @@
     "license": {
       "name": "Apache-2.0"
     },
-    "title": "NearSlot 预约系统 API",
+    "title": "NearSlot 通用本地生活服务预约平台 API",
     "version": "v1"
   },
   "openapi": "3.1.0",

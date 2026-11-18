@@ -3,7 +3,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.nearslot</groupId><artifactId>nearslot</artifactId><version>${revision}</version><packaging>pom</packaging>
-  <name>nearslot</name><description>NearSlot 时段预约系统 - 模块化单体</description>
+  <name>nearslot</name><description>NearSlot 通用本地生活服务预约平台 - 模块化单体（服务项/服务者/槽位/核销，业态由店铺配置）</description>
   <modules>
     <module>nearslot-common</module><module>nearslot-framework</module>
     <module>nearslot-module-auth</module><module>nearslot-module-shop</module>
