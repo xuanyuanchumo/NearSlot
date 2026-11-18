@@ -26,8 +26,9 @@ class JacksonConfigTest {
     void dateTimeWithOffset() throws Exception {
         String json = mapper.writeValueAsString(
             Map.of("t", LocalDateTime.of(2026, 11, 18, 10, 0, 0)));
-        assertTrue(json.matches(".*T10:00:00[+-]\\d{2}:\\d{2}.*"),
-            "时间必须带时区 offset：" + json);
+        // 固定业务时区 Asia/Shanghai：无论 CI(UTC) 还是本地(+08:00) 都输出 +08:00
+        assertTrue(json.contains("T10:00:00+08:00"),
+            "时间必须按业务时区 Asia/Shanghai 输出：" + json);
     }
 
     @Test

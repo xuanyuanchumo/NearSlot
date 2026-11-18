@@ -38,8 +38,13 @@ public class JacksonConfig {
     /** 输出格式：带 offset 的 ISO-8601（如 2026-11-18T10:00:00+08:00）。 */
     public static final DateTimeFormatter OUTPUT_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
-    /** 服务端时区（与 application.yaml 的 TZ / 业务 tzId 默认一致）。 */
-    private static final ZoneId SERVER_ZONE = ZoneId.systemDefault();
+    /**
+     * 业务默认时区——**固定为 Asia/Shanghai，不用 ZoneId.systemDefault()**。
+     * 实测：CI runner 是 UTC、开发机是 +08:00，用系统时区会导致同一业务时刻
+     * 在不同环境输出不同的墙钟值（2026-11-19 CI 失败根因）。
+     * 多时区场景由各实体的 tzId 字段 + 前端 Intl.DateTimeFormat 处理。
+     */
+    private static final ZoneId SERVER_ZONE = ZoneId.of("Asia/Shanghai");
 
     @Bean
     public ObjectMapper objectMapper() {
